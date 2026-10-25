@@ -1,0 +1,26 @@
+{
+  "name": "centralign-operator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24 <25", "npm": ">=10" },
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "preinstall": "node scripts/check-runtime.mjs",
+    "predev": "node scripts/check-runtime.mjs && npm run build --workspace @centralign/shared",
+    "dev": "concurrently --kill-others --names shared,server,web \"npm run dev --workspace @centralign/shared\" \"npm run dev --workspace @centralign/server\" \"npm run dev --workspace @centralign/web\"",
+    "build": "node scripts/check-runtime.mjs && npm run build --workspace @centralign/shared && npm run build --workspace @centralign/server && npm run build --workspace @centralign/web",
+    "typecheck": "node scripts/check-runtime.mjs && npm run build --workspace @centralign/shared && npm run typecheck --workspaces",
+    "test": "node scripts/check-runtime.mjs && npm run build --workspace @centralign/shared && vitest run",
+    "verify": "node scripts/check-runtime.mjs && npm run typecheck && npm test && npm run build",
+    "db:migrate": "node scripts/check-runtime.mjs && npm run build --workspace @centralign/shared && npm run db:migrate --workspace @centralign/server",
+    "db:seed": "node scripts/check-runtime.mjs && npm run build --workspace @centralign/shared && npm run db:seed --workspace @centralign/server",
+    "tools:smoke": "node scripts/check-runtime.mjs && npm run build --workspace @centralign/shared && vitest run apps/server/tests/tool-workflow.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "concurrently": "10.0.6",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
+  }
+}
