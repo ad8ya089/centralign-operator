@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type Database from 'better-sqlite3';
-import { ApprovalDecisionRequestSchema, CreateRunRequestSchema, JsonObjectSchema, RunEventRecordSchema, RunEventsPageSchema, SubmitInputSchema, parseStoredJson } from '@centralign/shared';
+import { ApprovalDecisionRequestSchema, CreateRunRequestSchema, FinalResultSchema, GoalSpecificationSchema, JsonObjectSchema, RunEventRecordSchema, RunEventsPageSchema, RunListPageSchema, SubmitInputSchema, UtcTimestampSchema, parseStoredJson } from '@centralign/shared';
 import type { AppConfig } from '../config/env.js';
 import { createToolLayer } from '../tools/layer.js';
 import type { ModelProvider, RuntimeBudgets, ToolExecutionPort } from './contracts.js';
@@ -40,6 +40,22 @@ export class RunService {
     this.kick(id); return { id, status: 'CREATED' };
   }
   snapshot(runId: string) { return this.store.snapshot(runId); }
+  list(cursor: string | null, limit: number) {
+    z.number().int().min(1).max(50).parse(limit);
+    let before: { createdAt: string; id: string } | null = null;
+    if (cursor) {
+      try { before = z.strictObject({ createdAt: UtcTimestampSchema, id: z.string().min(1).max(200) }).parse(JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as unknown); }
+      catch { throw new AgentFault('INVALID_CURSOR', 'The recent-runs cursor is invalid.', 'VALIDATION'); }
+    }
+    const rows = this.store.db.prepare(`SELECT r.id,a.goal_json,a.final_result_json FROM runs r JOIN agent_runs a ON a.run_id=r.id ${before ? 'WHERE r.created_at < ? OR (r.created_at = ? AND r.id < ?)' : ''} ORDER BY r.created_at DESC,r.id DESC LIMIT ?`).all(...(before ? [before.createdAt, before.createdAt, before.id, limit + 1] : [limit + 1])) as { id: string; goal_json: string | null; final_result_json: string | null }[];
+    const page = rows.slice(0, limit).map((row) => {
+      const run = this.store.run(row.id); const final = row.final_result_json ? parseStoredJson(row.final_result_json, FinalResultSchema) : null;
+      const goal = row.goal_json ? parseStoredJson(row.goal_json, GoalSpecificationSchema) : null;
+      return { id: run.id, objective: run.objective, status: run.status, createdAt: run.createdAt, updatedAt: run.updatedAt, summary: final?.summary ?? goal?.summary ?? null, verifiedCount: final?.verified.length ?? 0, requiredCount: goal?.deliverables.length ?? 0, blocker: final?.outstanding[0]?.reason ?? (this.store.questions(row.id, true)[0]?.reason ?? null) };
+    });
+    const last = page.at(-1);
+    return RunListPageSchema.parse({ runs: page, nextCursor: rows.length > limit && last ? Buffer.from(JSON.stringify({ createdAt: last.createdAt, id: last.id })).toString('base64url') : null });
+  }
   events(runId: string, after = 0, limit = 50) {
     this.store.state(runId);
     z.number().int().min(0).parse(after); z.number().int().min(1).max(100).parse(limit);

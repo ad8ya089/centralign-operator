@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { IdentifierSchema, JsonObjectSchema, JsonValueSchema, UtcTimestampSchema } from './primitives.js';
 import { ApprovalRecordSchema, ArtifactRecordSchema, RunEventRecordSchema, RunRecordSchema, RunStepRecordSchema } from './records.js';
+import { CustomerRecordSchema } from './business.js';
 
 const text = z.string().min(1).max(1000);
 export const DeliverableCategorySchema = z.enum(['CUSTOMER', 'CONTEXT', 'PROJECT', 'TASKS', 'ARTIFACT', 'EMAIL_DRAFT', 'EMAIL_SEND', 'ACTIVATION_READINESS']);
@@ -38,6 +39,8 @@ export const RunSnapshotSchema = z.strictObject({
   run: RunRecordSchema, goal: GoalSpecificationSchema.nullable(), plan: PlanSchema.nullable(), planRevision: z.number().int().nonnegative(),
   steps: z.array(RunStepRecordSchema).max(200), currentStepId: IdentifierSchema.nullable(),
   pendingQuestions: z.array(PendingQuestionSchema).max(10), pendingApprovals: z.array(ApprovalRecordSchema).max(10),
+  approvalHistory: z.array(ApprovalRecordSchema).max(200).default([]), questionHistory: z.array(PendingQuestionSchema).max(20).default([]),
+  businessStatus: z.strictObject({ customer: CustomerRecordSchema.pick({ id: true, companyName: true, status: true }), activation: z.enum(['BLOCKED', 'READY', 'UNCONFIRMED']), blockers: z.array(text).max(10) }).nullable().default(null),
   verification: z.array(VerificationCheckSchema).max(200), finalResult: FinalResultSchema.nullable(),
   artifacts: z.array(ArtifactRecordSchema).max(100),
   budgets: z.strictObject({ modelCalls: z.number().int().nonnegative(), toolCalls: z.number().int().nonnegative(), recoveries: z.number().int().nonnegative(), replans: z.number().int().nonnegative(), deadlineAt: UtcTimestampSchema }),
@@ -45,7 +48,10 @@ export const RunSnapshotSchema = z.strictObject({
   actions: z.array(z.strictObject({ stepId: IdentifierSchema, toolName: z.string(), deliverableIds: z.array(IdentifierSchema), expectedOutcome: z.string(), executionId: IdentifierSchema.nullable(), approvalId: IdentifierSchema.nullable(), blockedReason: z.string().nullable() })).max(200),
   milestones: z.array(z.strictObject({ id: IdentifierSchema, status: z.enum(['PENDING', 'IN_PROGRESS', 'VERIFIED', 'BLOCKED', 'WAITING_APPROVAL']), deliverableIds: z.array(IdentifierSchema) })).max(20),
 });
-export const RunEventsPageSchema = z.strictObject({ events: z.array(RunEventRecordSchema).max(100), cursor: z.number().int().nonnegative(), nextCursor: z.number().int().nonnegative().nullable() });
+// Read DTO permits a future event name; persisted producers still use EventTypeSchema.
+export const RunTimelineEventSchema = RunEventRecordSchema.extend({ type: z.string().min(1).max(100) });
+export const RunEventsPageSchema = z.strictObject({ events: z.array(RunTimelineEventSchema).max(100), cursor: z.number().int().nonnegative(), nextCursor: z.number().int().nonnegative().nullable() });
+export type RunTimelineEvent = z.infer<typeof RunTimelineEventSchema>;
 export const CreateRunRequestSchema = z.strictObject({ objective: z.string().min(1).max(8000).refine((value) => value.trim().length > 0, 'Objective must not be blank') });
 export const SubmitInputSchema = z.strictObject({ questionId: IdentifierSchema.max(200), answer: z.string().trim().min(1).max(4000), choiceId: IdentifierSchema.max(200).nullable().default(null) });
 export const ApprovalDecisionRequestSchema = z.strictObject({ decision: z.enum(['APPROVED', 'REJECTED']), note: z.string().max(1000).nullable().default(null) });
@@ -58,3 +64,13 @@ export type PendingQuestion = z.infer<typeof PendingQuestionSchema>;
 export type VerificationCheck = z.infer<typeof VerificationCheckSchema>;
 export type FinalResult = z.infer<typeof FinalResultSchema>;
 export type RunSnapshot = z.infer<typeof RunSnapshotSchema>;
+
+export const CreateRunResponseSchema = z.strictObject({ id: IdentifierSchema, status: z.literal('CREATED') });
+export const AcceptedResponseSchema = z.strictObject({ accepted: z.literal(true) });
+export const DecisionResponseSchema = AcceptedResponseSchema.extend({ repeated: z.boolean() });
+export const RunListPageSchema = z.strictObject({ runs: z.array(z.strictObject({
+  id: IdentifierSchema, objective: z.string().min(1).max(8000), status: RunRecordSchema.shape.status,
+  createdAt: UtcTimestampSchema, updatedAt: UtcTimestampSchema, summary: text.nullable(),
+  verifiedCount: z.number().int().min(0).max(20), requiredCount: z.number().int().min(0).max(20), blocker: text.nullable(),
+})).max(50), nextCursor: z.string().max(1000).nullable() });
+export type RunListPage = z.infer<typeof RunListPageSchema>;

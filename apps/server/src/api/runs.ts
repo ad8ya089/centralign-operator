@@ -5,6 +5,10 @@ import type { RunService } from '../agent/run-service.js';
 
 const RunParams = z.strictObject({ runId: IdentifierSchema.max(200) });
 export function registerRunRoutes(app: FastifyInstance, service: RunService): void {
+  app.get('/api/v1/runs', async (request) => {
+    const query = z.strictObject({ cursor: z.string().min(1).max(1000).optional(), limit: z.coerce.number().int().min(1).max(50).default(20) }).parse(request.query);
+    return service.list(query.cursor ?? null, query.limit);
+  });
   app.post('/api/v1/runs', { bodyLimit: 16000 }, async (request, reply) => reply.code(202).send(service.create(request.body)));
   app.get('/api/v1/runs/:runId', async (request) => service.snapshot(RunParams.parse(request.params).runId));
   app.get('/api/v1/runs/:runId/events', async (request) => {

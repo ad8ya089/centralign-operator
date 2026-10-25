@@ -8,6 +8,7 @@ import type { PermissionScope } from '../tools/contracts.js';
 import { canonicalJson, sha256 } from '../persistence/json.js';
 import { AgentFault } from './contracts.js';
 import type { RuntimeBudgets } from './contracts.js';
+import { BusinessStore } from '../tools/business-store.js';
 
 export const BudgetSchema = z.strictObject({ maxModelCalls: z.number().int().min(1).max(200), maxToolCalls: z.number().int().min(1).max(200), maxRecoveries: z.number().int().min(0).max(5), maxReplans: z.number().int().min(0).max(20), runTimeoutMs: z.number().int().min(1000).max(86400000), modelTimeoutMs: z.number().int().min(100).max(120000) });
 const StateRow = z.object({ run_id: z.string(), actor_id: z.string(), granted_scopes_json: z.string(), budgets_json: z.string(), goal_json: z.string().nullable(), resolved_customer_id: z.string().nullable(), model_calls: z.number(), tool_calls: z.number(), recoveries: z.number(), replans: z.number(), deadline_at: z.string(), cancel_requested: z.number(), lease_owner: z.string().nullable(), lease_expires_at: z.string().nullable(), feedback_json: z.string().nullable(), final_result_json: z.string().nullable() });
@@ -149,10 +150,16 @@ export class RunStore {
       return { id: milestone.id, deliverableIds: milestone.deliverableIds, status: passed ? 'VERIFIED' : related.some((step) => step.status === 'WAITING_APPROVAL') ? 'WAITING_APPROVAL' : related.some((step) => step.status === 'BLOCKED') ? 'BLOCKED' : related.length ? 'IN_PROGRESS' : 'PENDING' };
     });
     const publicFields = (value: JsonObject): JsonObject => Object.fromEntries(Object.entries(value).filter(([key, entry]) => ['id', 'customerId', 'projectId', 'draftId', 'approvalId', 'name', 'title', 'filename', 'query', 'recipient', 'subject', 'mimeType', 'status', 'path', 'contentHash', 'sessionId', 'url'].includes(key) && (typeof entry === 'string' || typeof entry === 'number' || entry === null)));
+    const customer = state.resolved_customer_id ? new BusinessStore(this.db).customer(state.resolved_customer_id) : null;
+    const blockers: string[] = [];
+    if (customer?.metadata['securityQuestionnaire'] === 'missing') blockers.push('Security questionnaire has not been received.');
+    if (customer && customer.metadata['securityReviewApproved'] !== true) blockers.push('Security review approval is not recorded.');
+    const activation = customer && (customer.status === 'BLOCKED' || blockers.length) ? 'BLOCKED' : customer && ['READY', 'ACTIVE'].includes(customer.status) && customer.metadata['securityQuestionnaire'] === 'received' ? 'READY' : 'UNCONFIRMED';
     return RunSnapshotSchema.parse({ run: this.run(runId), goal: state.goal, plan: plan.plan, planRevision: plan.revision, resolvedCustomerId: state.resolved_customer_id, cancelRequested: Boolean(state.cancel_requested), actions, milestones,
       steps: steps.map((step) => ({ ...step, input: publicFields(step.input), output: step.output === null ? null : { stored: true }, error: step.error })),
       currentStepId: steps.find((step) => !['SUCCEEDED', 'FAILED', 'SKIPPED', 'CANCELLED'].includes(step.status))?.id ?? null,
       pendingQuestions: this.questions(runId, true), pendingApprovals: this.approvals(runId, true), verification: checks,
+      approvalHistory: this.approvals(runId), questionHistory: this.questions(runId), businessStatus: customer ? { customer: { id: customer.id, companyName: customer.companyName, status: customer.status }, activation, blockers } : null,
       finalResult: state.final_result_json ? parseStoredJson(state.final_result_json, FinalResultSchema) : null, artifacts,
       budgets: { modelCalls: state.model_calls, toolCalls: state.tool_calls, recoveries: state.recoveries, replans: state.replans, deadlineAt: state.deadline_at } });
   }

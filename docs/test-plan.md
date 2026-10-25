@@ -182,3 +182,53 @@ No live OpenAI call was exercised: OPENAI_API_KEY was absent. Provider request/s
 Phase 4 should consume shared RunSnapshotSchema (run, goal, plan/revision, steps/actions/milestones, pending decisions, verification/final result, artifacts/budgets) and RunEventsPageSchema. Preserve cursor after the final page for polling; use exact approval action previews and pending question IDs. Use the three POST decision/input/cancel endpoints, never a public tool executor. Artifact metadata is available; a byte-serving/exploration interface and authenticated user identity remain later work.
 
 The earlier later-phase matrix above is historical: runtime/recovery, backend approval and deterministic backend E2E scenarios listed here are now implemented. Phase 4 UI and Phase 5 broader evaluation/hardening remain pending.
+
+## Phase 4 acceptance — 2026-10-26
+
+The checkout was clean at a04a1e6 before implementation. Node 24.19.0 and npm 10.9.2 were selected explicitly. The existing npm run verify baseline exited 0 with **193 tests across 19 files**, strict checking and all production builds before Phase 4 edits. Existing startup scripts were inspected; UI integration uses the same React/Vite workspace and Fastify construction on ephemeral loopback ports.
+
+Phase 4 preserves all Phase 1–3 suites, the three-process idempotency race, six restricted-browser checks, immutable migrations and production OpenAI-only submission. No normal development database or .local files were opened/modified for this phase. No pool/configuration change, skipped test, ignored worker error, frontend fake fallback or external website/model dependency was introduced.
+
+| New suite | Cases | Evidence |
+| --- | --- | --- |
+| run-read-api | 14 | Stable persisted run-list pages/cursor validation; attributed history and actual activation blocker; real file bytes/MIME/attachment/ETag/CSP/nosniff; missing/cross-run artifacts, path query/traversing metadata, absent/changed/oversized bytes, junctions/hard links, stale source references and unsupported MIME/hostile filename |
+| runs-api (web) | 13 | Actual create/decision/input/cancel routes and bodies; complete response schemas; configuration refusal without fallback; network/cancellation/8s timeout; malformed JSON, missing IDs, invalid acknowledgements, 404/409/500/temporary-503 classifications; event/cursor encoding and future event names; artifact digest/attachment validation |
+| run-monitor (web) | 6 | Ordered multi-page history, retained monotonic cursor, duplicate suppression, wrong-run/backward-cursor rejection, empty waiting polls, final terminal refresh/stop, transient backoff/reconnection, abort and suppression of late publication, readable future-event fallback |
+| ui-browser | 9 | Actual React browser journeys described below, including keyboard tabs and desktop/mobile layout |
+
+Actual commands and results:
+
+- npm run verify before editing: exit 0, 193/19.
+- npm run typecheck during implementation: passed after correcting browser-test DOM globals to use typed locator evaluation/globalThis. The server's Node-only type configuration was preserved.
+- Focused vitest run apps/server/tests/run-read-api.test.ts: 14/14 passed.
+- Initial focused frontend API/monitor run: 17 passed, 1 test fixture failure because a mocked Response body was reused after consumption. The mock now produces a fresh response per request; the final suite passes.
+- Initial vitest run apps/server/tests/ui-browser.test.ts: 7/7 browser journeys passed. Additional duplicate/reconnect/expiry/keyboard/narrow-layout assertions were then added.
+- First full integrated npm run verify: 234 tests/23 files passed, strict checks and production builds passed. Review then improved focus/validation/keyboard behavior and added the temporary-503 classification regression.
+- **Final npm run verify: exit 0; 235 tests across 23 files; zero failed/skipped tests or worker errors; shared/server/web strict checking and production builds passed.** The final test run took 69.61 seconds; Vite built 132 modules. The existing process pool and four concurrent file limit are unchanged.
+- git diff --check: passed. Only Phase 4 source/tests/docs are intended for the requested terminal commit; .env, node_modules, databases, screenshots, local logs and demo outputs remain ignored.
+
+Commands were run through the selected Node 24 executable and npm-cli.js on Windows, as documented in README. The equivalent normal commands are npm run typecheck, npm test, npm run build and npm run verify. No dependency installation or lockfile regeneration was needed.
+
+## Actual Phase 4 browser workflow
+
+ui-browser.test.ts starts a seeded temporary SQLite/workspace, the real Fastify app/runtime/tool layer with an explicitly injected FakeModelProvider, and the real Vite/React UI with its API proxy. Chromium runs locally with isolated contexts at 1440×1000 and 390×844 in Asia/Kolkata. No browser response fabricates a successful execution; targeted network/configuration failures are explicit test fixtures. The production application never constructs this provider for UI submissions.
+
+1. Submit the onboarding request through the visible form; navigate using the real returned run ID. Load more than 50 persisted events through actual cursor pages. Repeated refreshes retain unique event IDs. Inspect required outcomes/current plan and exercise arrow/Home keyboard tabs.
+2. At WAITING_APPROVAL, verify the exact persisted recipient, subject and full body, with zero decision requests/outbox messages before deliberate interaction. Reload and recover the same pending approval. Acknowledge review and confirm exact sandbox approval. Observe 7/7 verified required outcomes, one real sandbox row, persisted Approved history and separately BLOCKED activation/questionnaire evidence. Reload again and confirm terminal polling stops.
+3. Preview and download actual generated bytes; compare the browser download SHA-256 to persisted artifact metadata.
+4. In a separate run, reject through the UI; verify PARTIAL, zero outbox effects for that run, durable Rejected history and no approval control after reload.
+5. Create an actual ambiguous customer lookup with observed records. Reload the persisted question, reject empty input, choose a returned ID and answer through the UI. Verify the backend records that exact choice and reaches the required read-back result. Assert no horizontal overflow at 390px.
+6. Require the native cancellation confirmation. Hold the HTTP request briefly to verify the UI/backend remain WAITING_APPROVAL rather than optimistically cancelled; release it and verify persisted CANCELLED with no outbox effect.
+7. Resolve an approval externally through the same service while the browser has an old preview. Submit the stale UI decision, observe 409, a surviving conflict explanation and authoritative Rejected history.
+8. Generate a Markdown artifact containing script/image-handler text through the actual test-model/tool path. Preview it as literal text and verify no script flag executes. Tamper with the file, then verify 409, no preview and a Failed content state.
+9. Cover empty objectives, unconfigured backend responses, missing/invalid run links, simultaneous duplicate submit clicks, failed snapshot polls with disabled stale controls, successful reconnection without duplicate events and a genuinely expired persisted approval.
+
+All browsers, Vite listeners, runtime jobs and temporary databases close in test teardown. Review screenshots are deliberately ignored local artifacts under .data/phase4-review: desktop-workspace.png, desktop-approval.png, desktop-outcome.png, mobile-workspace.png and mobile-question.png. Actual screenshots were inspected; the page-wide focus outline was removed, stale clarification validation clears on edit, mobile controls have 44px targets, and tab navigation/focus were improved and rerun successfully.
+
+## Phase 4 limitations and Phase 5 handoff
+
+Phase 4 is a local single-user UI over the existing runtime, not production deployment or authentication. Human identity remains server-controlled; no frontend username grants authority. OPENAI_API_KEY is required for actual live submission and no live provider call was exercised. Email remains SANDBOX_QUEUED, never delivery; completed materials never imply READY. The ordinary development database and .local remain untouched.
+
+The timeline retains the latest 2,000 events with an explicit notice and expands older loaded rows; the durable API history remains available. Text preview caps at 32,000 characters, download access at 512 KiB and API JSON reads at 2 MiB. Customer questions without observed candidates cannot safely accept an arbitrary typed ID and remain blocked; reconciliation still requires the backend ledger. Filesystem/SQLite ownership and the earlier prototype durability assumptions remain unchanged. No Phase 5 evaluation framework, real integrations, authenticated users or public hosting were added.
+
+Phase 5 should use the existing workspace/run views, typed read/decision contracts and browser harness for broader evaluation. Documentation and the build plan now mark Phases 1–4 complete and Phase 5 pending.

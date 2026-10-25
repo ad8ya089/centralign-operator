@@ -1,8 +1,8 @@
 # CentrAlign Operator
 
-Phase 3 of a five-phase proof of concept: a single AI operator that plans from a natural-language goal, selects one action from current observations, executes through deterministic controls and independently verifies required outcomes.
+Phase 4 of a five-phase proof of concept: a single AI operator with a real workspace for submitting goals, following execution, reviewing exact actions and inspecting independently verified results.
 
-Implemented: the Phase 1/2 foundation and 15 tools, real OpenAI integration, structured goals/plans, durable sequential runtime, approvals/clarification APIs, bounded recovery, leases, duplicate suppression and fresh business/file verification. The web app remains a live health dashboard. Phase 4 run/approval/artifact UI and real email delivery are not implemented; email remains a local sandbox.
+Implemented: the Phase 1–3 runtime and 15 tools plus the run workspace, persisted recent runs, live event timeline, plans/steps, exact-action approval/rejection, clarification, cancellation, decision history, verification/source evidence and safe artifact download/text preview. Email remains a local sandbox. This is a loopback-only prototype with a fixed server-controlled local decision identity, not authenticated multi-user access. Phase 5 remains pending.
 
 ## Setup
 
@@ -76,17 +76,17 @@ After `npm run build`, `npm run start --workspace @centralign/server` runs the c
 
 Phase 1 acceptance passed on 2026-10-25 with Node 24.19.0 and npm 10.9.2: strict typecheck, 71 tests, production builds, full verify, migration CLI, live dashboard/retry/offline recovery, and compiled backend startup from another directory. All smoke-test processes were stopped. See docs/test-plan.md for the actual validation record, resolved failures, and limits.
 
-Stage A reproduced the unsupported-Node worker crash and added runtime guards. Phase 2 passed 124 tests/13 files. Phase 3 adds the autonomous backend; current commands/counts, baseline/browser findings and persisted demo evidence are in docs/test-plan.md. Phases 4 and 5 remain pending.
+Stage A reproduced the unsupported-Node worker crash and added runtime guards. Phase 2 passed 124 tests/13 files; Phase 3 passed 193 tests/19 files. Phase 4 adds the real user interface and scoped read APIs. Current commands/counts, browser workflow, limitations and validation evidence are in docs/test-plan.md. Phase 5 remains pending.
 
 ## Layout and handoff
 
 - `packages/shared/src`: canonical states, records, JSON/runtime validation, health/error schemas, and pure transition rules.
 - `apps/server/src`: root-aware environment configuration, SQLite lifecycle, migration runner/CLI, testable Fastify construction, and socket entry point.
-- `apps/web/src`: dashboard, reusable health client, and explicit loading/healthy/degraded/request-error states with manual retry.
+- `apps/web/src`: workspace and run views, typed API client, cursor monitor, decision forms, artifact access and reusable service health.
 - `fixtures/company`: three fictional sources indexed by the explicit seed command; never permission grants.
 - [Architecture](docs/architecture.md), [five-phase build plan](docs/BUILD_PLAN.md), [test plan](docs/test-plan.md), and [stack decision](docs/decisions/0001-foundation-stack.md).
 
-Phase 4 should use the shared agent schemas and apps/server/src/api/runs.ts with the existing RunService. RunSnapshot exposes goal, plan/revision, steps/actions/milestones, pending questions/approvals, verification, final result, counters and artifact metadata. Event pages expose a stable cursor. Use exact persisted approval previews and specific question IDs; never infer success from a model summary. Artifact byte/download UI and authenticated decision identity remain pending. There is no public generic tool endpoint or automatic seed.
+The UI uses the shared agent schemas and existing RunService. RunSnapshot exposes goal, plan/revision, steps/actions/milestones, pending/history questions and approvals, actual customer activation blockers, verification, final result, counters and artifact metadata. Event pages expose stable cursors. No public generic tool endpoint, frontend fake-model fallback, ad hoc authentication or automatic seed exists. Phase 5 should preserve these contracts and evaluate broader reliability without replacing persisted authority with model assertions.
 
 Preserve the shared-first build, single lockfile, Node 24 guard, persisted-state authority, exact-action approval, idempotency identity, and additive migrations. Do not edit applied migration SQL; checksums reject drift. A tool success or SANDBOX_QUEUED message is not final verified business completion or real email delivery.
 
@@ -97,11 +97,13 @@ Migration 0003 upgrades existing databases on startup or via npm run db:migrate;
 | Method and path under /api/v1 | Body / result |
 | --- | --- |
 | POST /runs | { objective }; HTTP 202 with id/status, background execution |
+| GET /runs?limit=20&cursor=... | Persisted executable runs, creation order with stable ID tie-breaker; max 50 per page |
 | GET /runs/:runId | Validated RunSnapshotSchema |
 | GET /runs/:runId/events?after=0&limit=50 | RunEventsPageSchema; max 100, cursor for later polling, nextCursor for another page |
 | POST /runs/:runId/input | { questionId, answer, choiceId? }; HTTP 202 |
 | POST /runs/:runId/approvals/:approvalId/decision | { decision: APPROVED or REJECTED, note? }; new 202, identical repeat 200 |
 | POST /runs/:runId/cancel | Empty object; HTTP 202, durable cancellation |
+| GET /runs/:runId/artifacts/:artifactId/content | Owning-run validated bytes, attachment only, bounded file and fresh hash/provenance checks |
 
 PowerShell example against a configured live server:
 
@@ -139,3 +141,17 @@ Questions/answers persist across restart. Free text cannot establish an uncertai
 The real provider uses official Responses structured output and server validation with storage disabled. Dynamic decisions use bounded observations and actual discovered IDs; only independent required-outcome checks permit COMPLETED. Acme's questionnaire remains missing: completed materials and a queued sandbox welcome message do not establish READY.
 
 Run npm run verify for typecheck, all tests and production builds. npm run agent:demo explicitly uses FakeModelProvider, actual HTTP/runtime/tools and an attributed human-decision fixture in its own new ignored database. It saves seven verified deliverables, persisted IDs and artifact byte hashes; it is not live-model validation or a production fallback. See docs/architecture.md and docs/decisions/0003-durable-single-agent-runtime.md for runtime/recovery details.
+
+## Using the run workspace
+
+Open http://127.0.0.1:5173 after npm run dev. Enter a goal or use the onboarding example, then select **Start run**. Live submission requires OPENAI_API_KEY on the backend. Without it, the workspace displays the real configuration error and creates no simulated success. Recent runs come from SQLite; selecting one or reopening /runs/ID reconstructs its persisted state.
+
+The **Activity** tab follows durable events; **Plan & work** distinguishes requested deliverables, current milestones and executed steps; **Evidence** shows recorded checks, sources and artifacts. Active/waiting runs refresh every two seconds, with capped reconnect backoff. Terminal runs receive a final refresh and stop polling. Refresh now can reread authoritative state manually. Large histories retain the latest 2,000 events with an explicit notice, and earlier loaded events are expandable.
+
+When approval is required, review the full recipient, subject and body. **Approve this exact action** opens a deliberate confirmation requiring review acknowledgment; **Reject this action** persists denial. Neither edits the canonical action. Decision history survives reload. Expired or conflicting decisions reload the current state; no frontend identity field grants authority. Approved messages are queued locally, never delivered as real email.
+
+For clarification, select a returned candidate where required and provide a nonempty answer. The form submits the exact question ID. No arbitrary customer-ID field is offered; questions without observed customer candidates remain blocked rather than guessing an account. Reconciliation questions require the backend's authoritative outcome, not just text. **Cancel run** requires confirmation, preserves committed work and may remain pending for reconciliation.
+
+Artifacts download only through their owning run's content route. Each access checks confinement, links, size, actual bytes/hash and recorded sources. Supported text/Markdown/JSON previews display inert text, never rendered HTML. Other content downloads as an attachment with an inert MIME type. A missing/tampered file shows a verification error. The final materials result and **Customer activation** are distinct; a missing questionnaire remains a visible blocker even when all requested materials are verified.
+
+Browser UI tests run automatically in npm run verify using installed Playwright Chromium, an isolated real backend with an explicitly injected test model, and Vite on loopback ephemeral ports. They never use the normal development database, .local, external sites or a live API key. Captured local review screenshots are ignored under .data/phase4-review. See docs/test-plan.md for exact coverage and results.

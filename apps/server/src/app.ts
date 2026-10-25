@@ -5,6 +5,7 @@ import type { AppConfig } from './config/env.js';
 import { openDatabase, closeDatabase } from './persistence/database.js';
 import { registerHealthRoute } from './api/health.js';
 import { registerRunRoutes } from './api/runs.js';
+import { registerArtifactRoute } from './api/artifact-content.js';
 import { RunService } from './agent/run-service.js';
 import type { RunServiceOptions } from './agent/run-service.js';
 import { AgentFault } from './agent/contracts.js';
@@ -43,7 +44,7 @@ export function createApp({ config, database, logging = true, agent }: AppOption
     app.setErrorHandler((error, request, reply) => {
       const validationError = error instanceof z.ZodError || error instanceof Error && 'validation' in error;
       const agentError = error instanceof AgentFault ? error : null;
-      const knownNotFound = agentError && ['RUN_NOT_FOUND', 'APPROVAL_NOT_FOUND'].includes(agentError.code);
+      const knownNotFound = agentError && ['RUN_NOT_FOUND', 'APPROVAL_NOT_FOUND', 'ARTIFACT_NOT_FOUND'].includes(agentError.code);
       const nativeStatus = typeof error === 'object' && error !== null && 'statusCode' in error && typeof error.statusCode === 'number' && error.statusCode >= 400 && error.statusCode < 500 ? error.statusCode : null;
       const status = knownNotFound ? 404 : agentError?.category === 'CONFIGURATION' ? 503 : agentError?.category === 'CONFLICT' ? 409 : validationError || agentError?.category === 'VALIDATION' ? 400 : nativeStatus ?? 500;
       const code = status === 404 ? 'NOT_FOUND' : status === 503 ? 'CONFIGURATION_ERROR' : status === 409 ? 'CONFLICT' : status < 500 ? 'VALIDATION_ERROR' : 'INTERNAL_ERROR';
@@ -56,6 +57,7 @@ export function createApp({ config, database, logging = true, agent }: AppOption
     });
     registerHealthRoute(app, db);
     registerRunRoutes(app, runs);
+    registerArtifactRoute(app, db, config.ARTIFACT_WORKSPACE_PATH);
     return app;
   } catch (error) {
     closeDatabase(db);

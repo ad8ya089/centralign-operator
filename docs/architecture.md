@@ -1,12 +1,13 @@
-# Architecture — Phases 1–3
+# Architecture — Phases 1–4
 
-CentrAlign Operator implements **Goal → Understand → Plan → Execute → Observe → Adapt → Verify → Complete** behind deterministic controls. The React screen remains a health dashboard. Run controls, timelines, approval buttons and artifact exploration remain Phase 4 work. Email means a local SQLite sandbox outbox, never network delivery.
+CentrAlign Operator implements **Goal → Understand → Plan → Execute → Observe → Adapt → Verify → Complete** behind deterministic controls. The Phase 4 React workspace creates/monitors actual runs, records human decisions and exposes verified evidence. Email means a local SQLite sandbox outbox, never network delivery. Phase 5 evaluation/hardening remains pending.
 
 ```mermaid
 flowchart LR
   User[Local user] --> API[Fastify runs and decisions]
-  Web[Health dashboard] --> Health[Health API]
-  UI[Phase 4 run UI: pending] -.-> API
+  Web[Workspace and run UI] --> Health[Health API]
+  Web --> API
+  Web --> Reads[Recent runs and scoped artifact content]
   API --> Service[Run service and background jobs]
   Service --> Runtime[Sequential runtime and durable lease]
   Runtime --> Decisions[Structured goal, plan and next action]
@@ -18,6 +19,8 @@ flowchart LR
   Tools --> Context[Indexed sources and customer resolution]
   Tools --> Business[Projects, tasks, drafts and sandbox outbox]
   Tools --> Files[Run-scoped artifact bytes]
+  Reads --> DB
+  Reads --> Files
   Tools --> Browser[Restricted read-only Playwright]
   Runtime --> Verify[Independent fresh read-back]
   Verify --> Business
@@ -100,4 +103,22 @@ Explicit seed/index refresh remains repeatable and transactional, preserving bus
 
 Playwright defaults to deny, permits configured exact HTTP(S) origins, validates redirects before requests, disables JavaScript/downloads/service workers/subresources and exposes bounded readable text. Sessions bind run/actor across sequential steps. No clicks or arbitrary evaluation tool exists. Startup/context creation check already-fired deadline signals as well as navigation timeouts.
 
-SQLite NORMAL is not a power-loss guarantee, and native synchronous work cannot be forcibly interrupted. Filesystem/SQLite ownership is trusted. External exactly-once execution, real integrations/delivery, authenticated identity, production scheduling/deployment and Phase 4 UI remain pending. Actual model quality/cost/availability require a live credentialed evaluation; deterministic tests cannot establish those properties.
+SQLite NORMAL is not a power-loss guarantee, and native synchronous work cannot be forcibly interrupted. Filesystem/SQLite ownership is trusted. External exactly-once execution, real integrations/delivery, authenticated identity and production scheduling/deployment remain pending. Actual model quality/cost/availability require a live credentialed evaluation; deterministic tests cannot establish those properties.
+
+## Phase 4 UI-to-API flow
+
+The existing React workspace uses browser history for home and /runs/:id, without an added routing/state framework. Workspace.tsx validates submission, prevents duplicate posts and navigates using the actual 202 response. GET /api/v1/runs is a read-only bounded keyset list over existing agent runs, ordered by created_at/id. Legacy foundation rows without runtime state are excluded because they cannot be opened through RunService. No UI run database or migration was introduced.
+
+runs-api.ts centralizes schema-validated run requests, safe structured errors, timeouts, abort signals and bounded response bytes. Existing specialized health validation is preserved. RunMonitor keeps an authoritative snapshot, unique event collection and monotonic sequence cursor. It drains page batches (40 pages per cycle), continues from the last cursor, retains the latest 2,000 events with a visible limit notice, and never substitutes timestamps for cursors. Active/waiting runs poll sequentially every two seconds; transient failures back off to at most 15 seconds. Terminal state receives final snapshot/event refresh and stops automatic polling. Navigation aborts reads and clears timers; manual refresh remains available. Read event DTOs accept unfamiliar bounded event names for readable fallback while persisted event producers retain the explicit union.
+
+RunDetail separates original request, structured goal, advisory plan/revision, actual steps and independent outcomes. Status text accompanies color. Browser reload reconstructs everything from the API. Snapshot additions expose persisted approval/question history and resolved customer status/activation blockers; GET does not run tools, models or append verification records. Customer readiness is never inferred from COMPLETED. The UI bounds metadata and previews, does not display internal artifact paths, and does not expose model reasoning.
+
+Approval cards parse the canonical SendEmailActionSchema and display recipient, subject and full body before a decision. Approval uses a review acknowledgment and explicit confirmation; rejection is persisted directly. Requests contain only decision/note, never modified action content or claimed identity. Both controls disable during a request or stale connection. Conflicts refresh current state and retain a visible explanation even if the pending card disappears. Decision history displays the persisted resolution after reload. Expired records are shown as un-actionable without inventing a new server status.
+
+Clarification forms submit specific question IDs, bounded nonempty answers and only returned candidate IDs. A customer question with no observed candidate remains blocked; there is no arbitrary ID entry. Reconciliation answers cannot bypass the backend ledger gate. Cancellation uses a native confirmation dialog and shows persisted cancellation/reconciliation state; it never locally marks a run cancelled or implies rollback. Controls are keyboard accessible, tabs support arrow/Home/End navigation, navigation moves focus to main content, and important statuses/errors are announced.
+
+GET /api/v1/runs/:runId/artifacts/:artifactId/content resolves the artifact only by same-run persisted identity. It rejects unsafe/traversing locations, linked ancestors, nonregular or multiply linked files, oversized content, descriptor identity changes, hash/size mismatches and stale document/chunk provenance. Reads allocate at most the stat size plus one byte (hard cap 512 KiB), so post-stat growth cannot cause an unbounded read. The route accepts no path query. It sends a sanitized attachment filename, correct safe text MIME or application/octet-stream for unsupported types, no-store, nosniff, sandbox CSP and digest ETag. No generic filesystem endpoint exists.
+
+The browser independently compares received bytes to the artifact digest and attachment identity before download or text preview. Text/Markdown/JSON are displayed as inert React text, capped at 32,000 preview characters; binary/unsupported content has download only. Recorded earlier verification is distinguished from successful current access. A content failure removes the preview and shows failure rather than a verified badge.
+
+The app remains a loopback-only single-user prototype. A local avatar or frontend form field is not authentication; decision identity stays server-controlled. Production never constructs the fake model for UI submission. Deterministic browser tests explicitly inject it into an isolated real backend and exercise the actual React/Vite interface and existing runtime/tools.
