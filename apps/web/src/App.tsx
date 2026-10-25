@@ -10,7 +10,7 @@ export default function App() {
       </header>
       <main>
         <div className="intro">
-          <span className="phase-badge"><span aria-hidden="true">01</span> Foundation & system contracts</span>
+          <span className="phase-badge"><span aria-hidden="true">02</span> Company context & tool layer</span>
           <h1>Verified work starts<br />with a reliable foundation.</h1>
           <p className="description">An autonomous enterprise operator designed to complete verified business work.</p>
         </div>
@@ -18,16 +18,16 @@ export default function App() {
           <ServiceHealth />
           <section className="scope-card" aria-labelledby="scope-title">
             <p className="eyebrow">CURRENT DEVELOPMENT PHASE</p>
-            <h2 id="scope-title">Phase 1 / 5</h2>
-            <p>The foundation for a durable, auditable operator.</p>
+            <h2 id="scope-title">Phase 2 / 5</h2>
+            <p>Deterministic server tools for the future runtime.</p>
             <ul className="foundation-list">
-              <li><span aria-hidden="true">01</span><div><strong>Shared contracts</strong><p>Typed records, validation, and state transitions.</p></div></li>
-              <li><span aria-hidden="true">02</span><div><strong>Local persistence</strong><p>Versioned SQLite schema and event protections.</p></div></li>
-              <li><span aria-hidden="true">03</span><div><strong>Connected dashboard</strong><p>Live API and database health checks.</p></div></li>
+              <li><span aria-hidden="true">01</span><div><strong>Company context</strong><p>Indexed fictional sources with traceable excerpts.</p></div></li>
+              <li><span aria-hidden="true">02</span><div><strong>Controlled local tools</strong><p>Typed writes, permissions, and idempotency.</p></div></li>
+              <li><span aria-hidden="true">03</span><div><strong>Sandbox communication</strong><p>Exact approval required for the local outbox.</p></div></li>
             </ul>
           </section>
         </div>
-        <aside className="boundary-note"><span className="note-icon" aria-hidden="true">i</span><div><strong>Foundation only</strong><p>Autonomous task execution and integrations are not implemented yet. Planning, company context, approvals, email, and independent verification arrive in later phases.</p></div></aside>
+        <aside className="boundary-note"><span className="note-icon" aria-hidden="true">i</span><div><strong>Server tools only</strong><p>Autonomous planning, task execution, real email delivery, approval interfaces, and independent business verification are not implemented yet. This dashboard displays live service health; tools run through trusted server modules.</p></div></aside>
       </main>
       <footer><span>CentrAlign Operator</span><span>Goal → Execute → Verify · Planned execution loop</span></footer>
     </div>
