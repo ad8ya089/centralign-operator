@@ -41,6 +41,7 @@ export class OpenAIModelProvider implements ModelProvider {
     } catch (error) {
       if (request.signal.aborted) throw new AgentFault('MODEL_CANCELLED', 'Model request was cancelled.', 'CANCELLED');
       if (error instanceof AgentFault) throw error;
+      if (error instanceof OpenAI.APIConnectionError && error.cause instanceof AgentFault) throw error.cause;
       if (error instanceof OpenAI.APIConnectionTimeoutError) throw new AgentFault('MODEL_TIMEOUT', 'Model request timed out.', 'TRANSIENT');
       if (error instanceof OpenAI.APIError && (error.status === 429 || (error.status ?? 0) >= 500)) throw new AgentFault('MODEL_TEMPORARY_FAILURE', 'Model provider is temporarily unavailable.', 'TRANSIENT');
       if (error instanceof OpenAI.APIConnectionError) throw new AgentFault('MODEL_CONNECTION_FAILED', 'Model provider connection failed.', 'TRANSIENT');

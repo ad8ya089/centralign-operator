@@ -25,7 +25,9 @@ describe('restricted Playwright adapter on isolated loopback origins', () => {
     deniedOrigin = `http://127.0.0.1:${(denied.address() as AddressInfo).port}`;
     await new Promise<void>((resolve) => allowed.listen(0, '127.0.0.1', resolve));
     origin = `http://127.0.0.1:${(allowed.address() as AddressInfo).port}`;
-    browser = new RestrictedBrowser([origin], 2000, 2000);
+    // Use the production 5s operation budget for positive cold-start checks.
+    // The dedicated deadline test below still exercises a 2s limit.
+    browser = new RestrictedBrowser([origin], 5000, 2000);
   });
   afterAll(async () => {
     await browser.close();
@@ -46,7 +48,7 @@ describe('restricted Playwright adapter on isolated loopback origins', () => {
     expect(deniedRequests).toBe(0);
     await expect(browser.snapshot('another-owner', opened.sessionId)).rejects.toMatchObject({ code: 'BROWSER_SESSION_DENIED' });
   // Cold Chromium startup + navigation + independent snapshot can exceed Vitest's 5s
-  // outer test limit on a busy Windows host. Adapter/network deadlines remain 2s.
+  // outer test limit on a busy Windows host. Production deadlines remain bounded.
   }, 15000);
   it('allows same-origin redirects but blocks a cross-origin redirect before requesting its target', async () => {
     const opened = await browser.open('owner-redirect', `${origin}/allowed-redirect`);
@@ -64,8 +66,11 @@ describe('restricted Playwright adapter on isolated loopback origins', () => {
     } finally { fixture.cleanup(); }
   });
   it('bounds content and navigation timeouts', async () => {
-    await expect(browser.open('owner-large', `${origin}/large`)).rejects.toMatchObject({ code: 'BROWSER_CONTENT_LIMIT' });
-    await expect(browser.open('owner-slow', `${origin}/slow`)).rejects.toMatchObject({ category: 'TRANSIENT' });
+    const bounded = new RestrictedBrowser([origin], 2000, 2000);
+    try {
+      await expect(bounded.open('owner-large', `${origin}/large`)).rejects.toMatchObject({ code: 'BROWSER_CONTENT_LIMIT' });
+      await expect(bounded.open('owner-slow', `${origin}/slow`)).rejects.toMatchObject({ category: 'TRANSIENT' });
+    } finally { await bounded.close(); }
   }, 10000);
   it('closes isolated sessions and can be closed repeatedly', async () => {
     const opened = await browser.open('owner-close', `${origin}/`);

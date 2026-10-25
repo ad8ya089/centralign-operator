@@ -29,10 +29,11 @@ describe('health HTTP API', () => {
     expect(response.body).not.toContain(fixture.path);
   });
 
-  it('returns a structured 404 without implementing future execution routes', async () => {
-    const response = await app.inject({ method: 'POST', url: '/api/v1/runs' });
-    expect(response.statusCode).toBe(404);
-    expect(ErrorResponseSchema.parse(response.json()).error.code).toBe('NOT_FOUND');
+  it('refuses unconfigured live runs with a structured error and no fake execution', async () => {
+    const response = await app.inject({ method: 'POST', url: '/api/v1/runs', payload: { objective: 'Prepare a brief' } });
+    expect(response.statusCode).toBe(503);
+    expect(ErrorResponseSchema.parse(response.json()).error.code).toBe('CONFIGURATION_ERROR');
+    expect(fixture.db.prepare('SELECT count(*) AS count FROM runs').get()).toEqual({ count: 0 });
   });
 
   it('closes its database connection on application shutdown', async () => {

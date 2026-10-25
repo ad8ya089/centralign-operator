@@ -122,11 +122,11 @@ export class RunStore {
     });
   }
   questions(runId: string, pendingOnly = false) {
-    const rows = this.db.prepare(`SELECT * FROM agent_questions WHERE run_id=? ${pendingOnly ? "AND status='PENDING'" : ''} ORDER BY created_at,id LIMIT 10`).all(runId);
+    const rows = this.db.prepare(`SELECT * FROM agent_questions WHERE run_id=? ${pendingOnly ? "AND status='PENDING'" : ''} ORDER BY rowid DESC LIMIT ${pendingOnly ? 10 : 20}`).all(runId);
     return rows.map((raw) => { const row = z.object({ id: z.string(), proposal_json: z.string(), status: z.string(), answer: z.string().nullable(), choice_id: z.string().nullable(), created_at: z.string(), answered_at: z.string().nullable() }).parse(raw); return PendingQuestionSchema.parse({ ...parseStoredJson(row.proposal_json, QuestionProposalSchema), id: row.id, runId, status: row.status, answer: row.answer, choiceId: row.choice_id, createdAt: row.created_at, answeredAt: row.answered_at }); });
   }
   approvals(runId: string, pendingOnly = false) {
-    return this.db.prepare(`SELECT id,run_id AS runId,step_id AS stepId,action_json,policy_reason AS policyReason,status,requested_at AS requestedAt,expires_at AS expiresAt,decided_at AS decidedAt,decision_maker AS decisionMaker,decision_note AS decisionNote FROM approvals WHERE run_id=? ${pendingOnly ? "AND status='PENDING'" : ''} ORDER BY requested_at,id LIMIT 10`).all(runId).map((raw) => {
+    return this.db.prepare(`SELECT id,run_id AS runId,step_id AS stepId,action_json,policy_reason AS policyReason,status,requested_at AS requestedAt,expires_at AS expiresAt,decided_at AS decidedAt,decision_maker AS decisionMaker,decision_note AS decisionNote FROM approvals WHERE run_id=? ${pendingOnly ? "AND status='PENDING'" : ''} ORDER BY requested_at,id LIMIT ${pendingOnly ? 10 : 200}`).all(runId).map((raw) => {
       const row = z.record(z.string(), z.unknown()).parse(raw); const { action_json, ...fields } = row;
       return ApprovalRecordSchema.parse({ ...fields, action: parseStoredJson(z.string().parse(action_json), JsonObjectSchema) });
     });
@@ -142,8 +142,15 @@ export class RunStore {
     const state = this.state(runId); const plan = this.plan(runId); const steps = this.steps(runId);
     const checks = (this.db.prepare('SELECT check_json FROM agent_verifications WHERE run_id=? ORDER BY rowid DESC LIMIT 200').all(runId) as { check_json: string }[]).map((row) => parseStoredJson(row.check_json, VerificationCheckSchema));
     const artifacts = this.db.prepare('SELECT id,run_id AS runId,step_id AS stepId,name,path,mime_type AS mimeType,content_hash AS contentHash,metadata_json,created_at AS createdAt FROM artifacts WHERE run_id=? LIMIT 100').all(runId).map((raw) => { const row = z.record(z.string(), z.unknown()).parse(raw); const { metadata_json, ...fields } = row; return ArtifactRecordSchema.parse({ ...fields, metadata: parseStoredJson(z.string().parse(metadata_json), JsonObjectSchema) }); });
-    return RunSnapshotSchema.parse({ run: this.run(runId), goal: state.goal, plan: plan.plan, planRevision: plan.revision,
-      steps: steps.map((step) => ({ ...step, input: { ...step.input, ...(typeof step.input['content'] === 'string' ? { content: '[Stored artifact content omitted from snapshot]' } : {}), ...(typeof step.input['body'] === 'string' ? { body: '[Stored draft body omitted from snapshot]' } : {}) }, output: step.output === null ? null : { stored: true }, error: step.error })),
+    const actions = this.actions(runId).map((action) => ({ stepId: action.step_id, toolName: action.tool_name, deliverableIds: (this.db.prepare('SELECT deliverable_id FROM agent_step_deliverables WHERE step_id=?').all(action.step_id) as { deliverable_id: string }[]).map((item) => item.deliverable_id), expectedOutcome: action.expected_outcome, executionId: action.execution_id, approvalId: action.approval_id, blockedReason: action.blocked_reason }));
+    const milestones = (plan.plan?.milestones ?? []).map((milestone) => {
+      const related = actions.filter((action) => action.deliverableIds.some((id) => milestone.deliverableIds.includes(id))).map((action) => this.step(action.stepId));
+      const passed = milestone.deliverableIds.every((id) => checks.find((check) => check.targetId === id)?.passed === true);
+      return { id: milestone.id, deliverableIds: milestone.deliverableIds, status: passed ? 'VERIFIED' : related.some((step) => step.status === 'WAITING_APPROVAL') ? 'WAITING_APPROVAL' : related.some((step) => step.status === 'BLOCKED') ? 'BLOCKED' : related.length ? 'IN_PROGRESS' : 'PENDING' };
+    });
+    const publicFields = (value: JsonObject): JsonObject => Object.fromEntries(Object.entries(value).filter(([key, entry]) => ['id', 'customerId', 'projectId', 'draftId', 'approvalId', 'name', 'title', 'filename', 'query', 'recipient', 'subject', 'mimeType', 'status', 'path', 'contentHash', 'sessionId', 'url'].includes(key) && (typeof entry === 'string' || typeof entry === 'number' || entry === null)));
+    return RunSnapshotSchema.parse({ run: this.run(runId), goal: state.goal, plan: plan.plan, planRevision: plan.revision, resolvedCustomerId: state.resolved_customer_id, cancelRequested: Boolean(state.cancel_requested), actions, milestones,
+      steps: steps.map((step) => ({ ...step, input: publicFields(step.input), output: step.output === null ? null : { stored: true }, error: step.error })),
       currentStepId: steps.find((step) => !['SUCCEEDED', 'FAILED', 'SKIPPED', 'CANCELLED'].includes(step.status))?.id ?? null,
       pendingQuestions: this.questions(runId, true), pendingApprovals: this.approvals(runId, true), verification: checks,
       finalResult: state.final_result_json ? parseStoredJson(state.final_result_json, FinalResultSchema) : null, artifacts,

@@ -28,8 +28,10 @@
 - Scope: Understand → Plan → Execute → Observe → Adapt → Verify, persisted ledger writes and concurrency checks, bounded budgets/retries/deadlines, crash recovery, uncertain-write reconciliation, independent postconditions.
 - Dependencies: Phase 2 source/tool contracts; explicit provider/configuration requirements; migrations for runtime data where necessary.
 - Acceptance: a restart resumes persisted state; no blind retry of ambiguous writes; invalid transitions preserve state; bounded repair; independent final verification; honest FAILED/PARTIAL outcomes.
-- Status: **Pending.**
-- Outstanding: entire runtime, provider integration, recovery scheduler, verifier, and failure-injection tests. Do not replace persisted authority with model memory.
+- Status: **Complete — Phase 3 backend acceptance passed with Node 24.19.0/npm 10.9.2; full verification passed 193 tests/19 files, strict type checking and production builds.**
+- Implemented: real OpenAI Responses provider with optional-key startup/no-row live submission rejection; explicitly injected fake; immutable required goal outcomes and revisioned plans; dynamic single-action loop through the existing 15 tools; durable events, leases/fences, budgets, approvals, questions, cancellation and restart recovery; semantic duplicate suppression and uncertain-write reconciliation; independent row/file step and final verification; lifecycle/decision APIs. Migration 0003 preserves 0001/0002 and existing data.
+- Observed: baseline 124-test gate passed after investigating the first Chromium cold-start outer timeout. Expanded positive browser fixtures use the production 5s budget; dedicated negative bounds remain 2s. Full verification with four concurrent test files passes without skips or worker errors; the explicit three-process race remains enabled. Persisted isolated fake-model demo completed seven materials/send outcomes after exact approval, with actual bytes/hash and zero outbox before approval; activation remains BLOCKED. Migration CLI and live direct/proxied HTTP launch/shutdown passed. Actual counts, IDs, intermediate failures and commands are recorded in test-plan.md.
+- Outstanding: no required Phase 3 backend implementation remains. Live OpenAI quality/cost/availability was not exercised because no key was configured. Email is simulated; decision identity is fixed/local, not authenticated. Phase 4/5 remain pending.
 
 ## 4. User interface, durable approval, and evidence
 
@@ -38,7 +40,7 @@
 - Dependencies: runtime and persisted events from Phase 3, tool-policy gates from Phase 2; authenticated decision identity design.
 - Acceptance: no action executes before required approval; changed arguments invalidate authorization; decisions survive restart; rejecting an action cannot be silently reversed; evidence and blockers are visible; UI reflects actual state.
 - Status: **Pending.**
-- Outstanding: all execution and approval UI/APIs, authorization enforcement, and UI/integration tests. Phase 1 only has a health dashboard.
+- Outstanding: execution/timeline/approval/input/artifact UI, authenticated decision identity and UI/integration tests. Phase 3 supplies backend lifecycle, approval/input/cancel APIs and shared snapshot/event DTOs; the current frontend remains a health dashboard.
 
 ## 5. Hardening, evaluation, and final demonstration
 

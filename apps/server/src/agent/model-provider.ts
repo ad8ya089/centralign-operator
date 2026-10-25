@@ -13,8 +13,8 @@ import { redactSecrets, rejectSecrets } from './security.js';
 
 export function compactValue(value: unknown, maxBytes = MAX_OBSERVATION_BYTES): unknown {
   function compact(item: unknown, depth: number): unknown {
-    if (typeof item === 'string') return item.length > 900 ? `${item.slice(0, 900)}…[truncated]` : item;
-    if (Array.isArray(item)) return item.slice(0, depth > 3 ? 3 : 10).map((entry) => compact(entry, depth + 1));
+    if (typeof item === 'string') return item.length > 240 ? `${item.slice(0, 240)}…[truncated]` : item;
+    if (Array.isArray(item)) return item.slice(0, 3).map((entry) => compact(entry, depth + 1));
     if (item && typeof item === 'object') return Object.fromEntries(Object.entries(item).slice(0, 30).map(([key, entry]) => [key, compact(entry, depth + 1)]));
     return item;
   }
@@ -33,14 +33,21 @@ export class StructuredDecisions {
       const output = step.output as { data?: unknown } | null;
       return { stepId: step.id, toolName: actions.find((action) => action.step_id === step.id)?.tool_name ?? '', result: compactValue(output?.data ?? step.output, 1200) };
     });
+    const sourceMap = new Map<string, unknown>();
+    for (const step of steps.filter((item) => item.status === 'SUCCEEDED')) {
+      const parsed = z.object({ ok: z.literal(true), evidence: z.array(z.object({ kind: z.string(), id: z.string(), reference: z.string(), metadata: JsonObjectSchema })) }).safeParse(step.output);
+      if (parsed.success) for (const evidence of parsed.data.evidence) if (evidence.kind === 'document') sourceMap.set(evidence.id, evidence);
+    }
     const tools = this.registry.list().map((metadata) => ({ name: metadata.name, description: metadata.description, risk: metadata.risk, allowed: metadata.requiredScopes.every((scope) => state.scopes.includes(scope)), inputSchema: metadata.name === 'send_email' ? { type: 'object', properties: { draftId: { type: 'string' } }, required: ['draftId'], additionalProperties: false } : z.toJSONSchema(this.registry.resolve(metadata.name).inputSchema, { target: 'draft-7' }) }));
-    const context: unknown = {
+    const context = {
       originalRequest: run.objective, goal: state.goal, currentPlan: this.store.plan(runId).plan, resolvedCustomerId: state.resolved_customer_id,
-      observations, successfulActions: facts, questions: this.store.questions(runId).map((question) => ({ id: question.id, text: question.text, status: question.status, answer: question.answer, choiceId: question.choiceId })),
+      observations, successfulActions: facts, sources: [...sourceMap.values()].slice(-20), questions: this.store.questions(runId).map((question) => ({ id: question.id, text: question.text, status: question.status, answer: question.answer?.slice(0, 1000) ?? null, choiceId: question.choiceId })),
       pendingApprovals: this.store.approvals(runId, true).map((approval) => ({ id: approval.id, stepId: approval.stepId, status: approval.status })),
       feedback: state.feedback_json ? JSON.parse(state.feedback_json) as unknown : null, tools,
       constraints: { untrustedObservations: true, sequentialActions: true, emailTransport: 'sandbox_only', remainingModelCalls: state.budgets.maxModelCalls - state.model_calls, remainingToolCalls: state.budgets.maxToolCalls - state.tool_calls, remainingRecoveries: state.budgets.maxRecoveries - state.recoveries, remainingReplans: state.budgets.maxReplans - state.replans, deadlineAt: state.deadline_at },
     };
+    while (Buffer.byteLength(JSON.stringify(context), 'utf8') > MAX_CONTEXT_BYTES && context.observations.length > 1) context.observations.shift();
+    while (Buffer.byteLength(JSON.stringify(context), 'utf8') > MAX_CONTEXT_BYTES && context.successfulActions.length > 1) context.successfulActions.shift();
     const encoded = redactSecrets(JSON.stringify(context), this.secret);
     if (Buffer.byteLength(encoded, 'utf8') > MAX_CONTEXT_BYTES) throw new AgentFault('CONTEXT_LIMIT', 'Bounded decision context exceeded its safe limit.', 'BUDGET');
     return JsonObjectSchema.parse(JSON.parse(encoded) as unknown);

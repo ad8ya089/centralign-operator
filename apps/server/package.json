@@ -12,6 +12,7 @@
     "typecheck": "tsc -p tsconfig.check.json --noEmit",
     "db:migrate": "tsx src/cli/migrate.ts",
     "db:seed": "tsx src/cli/seed.ts",
+    "agent:demo": "tsx src/cli/agent-demo.ts",
     "start": "node dist/main.js"
   },
   "dependencies": {

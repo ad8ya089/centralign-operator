@@ -3,7 +3,7 @@ import { lstatSync, readFileSync } from 'node:fs';
 import { isAbsolute, parse, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { ArtifactRecordSchema, DocumentCitationSchema, FinalResultSchema, JsonObjectSchema, RelativePathSchema, VerificationCheckSchema, parseStoredJson } from '@centralign/shared';
-import type { FinalResult, JsonObject, VerificationCheck } from '@centralign/shared';
+import type { FinalResult, VerificationCheck } from '@centralign/shared';
 import { BusinessStore } from '../tools/business-store.js';
 import { ToolOutcomeSchema } from '../tools/contracts.js';
 import type { ToolOutcome } from '../tools/contracts.js';
@@ -98,15 +98,17 @@ export class IndependentVerifier {
         if (check.passed) for (const evidence of check.evidence) ids.add(evidence.id);
       }
       let passed = ids.size >= deliverable.minCount;
+      if (deliverable.category === 'CUSTOMER') passed = Boolean(state.resolved_customer_id && ids.has(state.resolved_customer_id) && ids.size >= deliverable.minCount);
       if (deliverable.category === 'ACTIVATION_READINESS') passed = Boolean(customer && ['READY', 'ACTIVE'].includes(customer.status) && customer.metadata['securityQuestionnaire'] === 'received' && customer.metadata['securityReviewApproved'] === true);
       const explanation = passed ? 'Required persisted evidence passed independent verification.' : pending ? 'A required human decision or answer is outstanding.' : anyAttempt ? 'Required evidence is insufficient or failed read-back verification.' : 'Required work has not been executed.';
       const check = this.result(deliverable.id, passed, explanation, { minCount: deliverable.minCount, category: deliverable.category }, { evidenceCount: ids.size }, [], true);
       this.store.check(runId, check, null, deliverable.id); checks.push(check);
-      if (passed) verified.push({ deliverableId: deliverable.id, description: deliverable.description, evidenceIds: [...ids] });
+      if (passed) verified.push({ deliverableId: deliverable.id, description: deliverable.description, evidenceIds: [...ids].slice(0, 50) });
       else outstanding.push({ deliverableId: deliverable.id, reason: explanation });
     }
     const complete = Boolean(goal && checks.length > 0 && checks.every((check) => check.passed) && !pending);
-    const result = FinalResultSchema.parse({ summary: complete ? 'All requested deliverables passed independent verification. Email, if requested, was queued only in the local sandbox.' : 'Requested work remains incomplete; only the verified deliverables listed here are established.', verified, outstanding, unverifiedStepIds: allSteps.filter((step) => step.status !== 'SUCCEEDED' || !this.store.db.prepare("SELECT 1 FROM agent_verifications WHERE step_id=? AND json_extract(check_json,'$.passed')=1").get(step.id)).map((step) => step.id), neverExecuted: (goal?.deliverables ?? []).filter((item) => !actions.some((action) => this.store.db.prepare('SELECT 1 FROM agent_step_deliverables WHERE step_id=? AND deliverable_id=?').get(action.step_id, item.id))).map((item) => item.id), warnings });
+    if (goal?.deliverables.some((item) => item.category === 'EMAIL_SEND')) warnings.push('Email evidence refers to the local sandbox outbox; no real email delivery occurred.');
+    const result = FinalResultSchema.parse({ summary: complete ? 'All requested deliverables passed independent verification.' : 'Requested work remains incomplete; only the verified deliverables listed here are established.', verified, outstanding, unverifiedStepIds: allSteps.filter((step) => step.status !== 'SUCCEEDED' || !this.store.db.prepare("SELECT 1 FROM agent_verifications WHERE step_id=? AND json_extract(check_json,'$.passed')=1").get(step.id)).map((step) => step.id), neverExecuted: (goal?.deliverables ?? []).filter((item) => !actions.some((action) => this.store.db.prepare('SELECT 1 FROM agent_step_deliverables WHERE step_id=? AND deliverable_id=?').get(action.step_id, item.id))).map((item) => item.id), warnings });
     return { checks, result, complete };
   }
 }

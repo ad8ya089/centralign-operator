@@ -125,3 +125,60 @@ Known limits: these are local business simulations, not external CRM/email integ
 | End-to-end | Acme onboarding artifacts cite sources; missing security questionnaire blocks activation; outbound email requires exact-action approval; incomplete work ends PARTIAL/FAILED with evidence; failed final verification prevents COMPLETED |
 
 Passing health tests is not evidence that any business workflow, recovery mechanism, approval gate, or independent verifier works. Each later feature must add tests and update this document.
+
+
+## Phase 3 acceptance and reproduction
+
+Phase 3 was implemented on the verified Phase 2 repository using Node 24.19.0 / npm 10.9.2. The initial baseline ran all 124 tests/13 files: 123 passed and the first Chromium cold-start test exceeded Vitest's outer five-second timeout. All six browser tests passed in isolation. Giving that multi-operation cold-start test a 15-second outer allowance produced a full baseline pass, with typecheck and all builds passing before runtime work proceeded. No worker crash or native binding failure occurred under Node 24.
+
+The expanded parallel suite subsequently exposed the same first-browser-test timeout at 15 seconds (189/190 and later 192/193 other tests passed). Both isolated browser diagnostics and a Playwright-debug full parallel run passed. The positive fixture had a two-second total budget covering launch/context/navigation; it now uses the production five-second budget, while a dedicated negative fixture still enforces two-second navigation/content bounds. Review also fixed an already-fired abort signal being missed after Chromium startup/context creation. A further full regression passed 192/193 but timed out during the negative fixture's separate cold launch. This host reports 16 logical processors, about 16 GB RAM and only about 2 GB free at inspection. Concurrent file workers are now capped at four to bound native/SDK/Chromium resource pressure; file parallelism, the process pool, isolation and the explicit three-process race remain enabled. No test was skipped, pool switched, worker error ignored, or failing command treated as success. Temporary tracing was removed. The exact host scheduling delay was not independently measured.
+
+| New suite | Actual checks |
+| --- | --- |
+| agent-model | Official SDK request format/store:false, unconfigured provider, 429/500/503 transient classification, 400/401 permanent errors, malformed/incomplete/oversized output, transport limit, cancellation, context/provenance/ID retention, redaction, conservative scopes and configuration bounds |
+| agent-runtime | One schema repair, invalid repair exhaustion, plan coverage repair, unsupported tools/trust fields, scope/association rejection, completion without evidence, model/tool/deadline/replan limits, transient retries, noncooperative provider timeout, cancellation, single-flight and stale lease fencing, actual committed response loss, semantic duplicate suppression, classified read retries, safe error reporting, unknown-write cancellation/reconciliation |
+| agent-api-recovery | Optional-key health/startup and no-row 503, strict/secret-bearing bodies, original request preservation, bounded cursor pagination, 404/400/no executor route, attributed approval/rejection/idempotency/conflicts, expiry and forged identity, approval restart with no new model activity, specific clarification after restart, committed effect reconstruction, cancellation while approval waits |
+| agent-verifier | Missing/changed bytes, stored hash/MIME/owner/citation/source errors, changed project/task/draft, missing/changed outbox and mismatched approval, successful tool output without persisted effect, explicit activation prerequisite failure |
+| agent-migration | Real version-2 schema upgraded with all old events/run/step/checksums preserved; event order, append-only triggers, explicit event types, foreign keys and repeat migration |
+| agent-e2e | Actual HTTP API/runtime/tools with observation-driven fake: source discovery, resolved customer, project, two tasks, source-backed file bytes/hash, draft, zero outbox before exact approval, approved send, fresh verification and seven required outcomes; customer remains BLOCKED |
+
+The test provider is explicitly injected and uses actual observed business IDs. Production selects OpenAIModelProvider and never silently falls back. These tests use temporary databases and loopback Chromium fixtures without a live model/network dependency. The provider tests exercise the real SDK through an injected fetch, not a mock SDK method. The three-process Phase 2 idempotency test and all six real Chromium tests remain included.
+
+During test authoring, typecheck caught a JsonValue needing explicit JsonObject validation, and several new test calls used the service's string objective instead of its strict request object; the tests were corrected and rerun. The final gate below includes those corrections.
+
+Actual commands and results:
+
+- npm run typecheck: passed (shared/server/web, including tests).
+- Focused agent-runtime + agent-api-recovery run: initially 30 tests passed; later additions are included in the final gate.
+- Focused agent-model + agent-verifier run: 33 tests passed before later scope coverage.
+- Isolated browser diagnostic: 6/6 passed.
+- Instrumented full parallel diagnostic: 190/190 passed; a later diagnostic passed 193/193.
+- **Final npm run verify: exit 0; 193 tests across 19 files, zero failures/skips/worker errors; strict checks and shared/server/web production builds passed.** The final configured parallel limit is four concurrent test files. Earlier uncapped diagnostics also passed, but exposed the resource-sensitive cold-start failures recorded above.
+- npm run db:migrate: version 3 applied to the existing development database; original version-1 applied_at 2026-10-25T14:16:28.764Z and version-2 applied_at 2026-10-25T16:24:38.684Z preserved. Versions 0001/0002 have no source diff.
+- npm run agent:demo: exit 0, isolated persisted deterministic demo described below.
+- Root npm run dev: shared watcher reported zero errors; Fastify and Vite started on 3001/5173 using the isolated demo database. Direct/proxied health and web returned 200; proxied GET of the persisted run returned COMPLETED; real HTTP POST without a key returned 503 CONFIGURATION_ERROR. Ctrl+C logged server shutdown; ports 3001/5173 had no remaining listeners. The Windows PTY's deliberate interruption returned 1, not a test failure. The final production build includes the corrected Phase 3 status text; no Phase 4 UI was added.
+
+## Persisted Phase 3 demo evidence
+
+This is an explicitly labeled FakeModelProvider demonstration with real runtime, HTTP API and business tools. No live OpenAI request or external email occurred. Its human decision is an attributed test/demo fixture, not a claim that a person approved an actual delivery.
+
+- Run: b02837da-4ed5-4d20-8b7c-3c26fcf7ce44.
+- Approval: 83962fc9-25fa-483b-8172-0a6172aca962.
+- State: WAITING_APPROVAL with zero outbox messages, then COMPLETED after exact approval and independent verification.
+- Verified required IDs: account, sources, project, checklist, brief, draft, welcome.
+- Project: project-exec-0810a8ac06d081d651df98c7294931a994f5f916b81a40ae470c5b1bfaf8dbb6.
+- Tasks: task-exec-dec902aee59bc260e77a27b077f42d25942f885586cf4c75031aebe128059456 and task-exec-d574cb443752791a975f8ccacbfa17e883cadd618df38245f094215655186a8f.
+- Draft: draft-exec-d384cf2fe7b8a820b13ce73ae1d82fd939f6d935b2debea12773a9ccb7b800b4.
+- Sandbox outbox: outbox-exec-38317943cd602752ede7af73a1612c867e35a99170d726c078b798fb6affb386.
+- Artifact: artifact-exec-d1b00bd5a518835baa3b7425472018eb7994e212939f5f0ee18beec16d2f4236; actual/stored SHA-256 both 3ee9328b59e5e8a6bbcfa3ad176468638bbf510361b74c0a3511f8859e94d003.
+- 13 model calls, 118 persisted events, one project, two tasks and one sandbox message.
+- Actual retained report: .data/demos/73a3026a-672e-4201-bb6c-139bd8c0e3f5/report.json; database: demo.sqlite in that directory; artifact bytes under its workspace/artifacts/runs subtree. All are ignored local evidence, deliberately separate from the normal database and .local.
+- Warnings: questionnaire missing and activation BLOCKED; materials completion does not imply readiness. SANDBOX_QUEUED does not imply delivery.
+
+## Phase 3 limits and Phase 4 handoff
+
+No live OpenAI call was exercised: OPENAI_API_KEY was absent. Provider request/schema/error behavior is tested; actual model quality, cost and service availability remain unvalidated. Email stays local, decision attribution is a trusted fixed local identity rather than authentication, and files/SQLite are not an atomic distributed transaction. SQLite NORMAL and cooperative async cancellation retain the documented prototype limits. No .local content or original source fixtures were modified.
+
+Phase 4 should consume shared RunSnapshotSchema (run, goal, plan/revision, steps/actions/milestones, pending decisions, verification/final result, artifacts/budgets) and RunEventsPageSchema. Preserve cursor after the final page for polling; use exact approval action previews and pending question IDs. Use the three POST decision/input/cancel endpoints, never a public tool executor. Artifact metadata is available; a byte-serving/exploration interface and authenticated user identity remain later work.
+
+The earlier later-phase matrix above is historical: runtime/recovery, backend approval and deterministic backend E2E scenarios listed here are now implemented. Phase 4 UI and Phase 5 broader evaluation/hardening remain pending.

@@ -15,8 +15,8 @@ describe('SQLite foundation', () => {
   it('creates all versioned tables and safely reapplies migrations', () => {
     const { db } = fixture;
     expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'document_chunks_fts%' ORDER BY name").all()).toEqual([
-      'approvals', 'artifacts', 'company_documents', 'customers', 'document_chunks', 'email_drafts', 'memory_entries', 'projects', 'run_events', 'run_steps', 'runs', 'sandbox_outbox', 'schema_migrations', 'tasks', 'tool_executions',
-    ].map((name) => ({ name })));
+      'agent_deliverables', 'agent_model_calls', 'agent_plan_revisions', 'agent_questions', 'agent_runs', 'agent_step_deliverables', 'agent_steps', 'agent_verifications', 'approvals', 'artifacts', 'company_documents', 'customers', 'document_chunks', 'email_drafts', 'memory_entries', 'projects', 'run_events', 'run_steps', 'runs', 'sandbox_outbox', 'schema_migrations', 'tasks', 'tool_executions',
+    ].sort().map((name) => ({ name })));
     const before = db.prepare('SELECT * FROM schema_migrations').all();
     expect(before).toHaveLength(migrations.length);
     expect(before[0]).toMatchObject({ version: 1, name: 'foundation' });

@@ -13,10 +13,11 @@ export function rejectSecrets(text: string, secret?: string): void {
 }
 export function permissionsForObjective(objective: string): PermissionScope[] {
   const scopes: PermissionScope[] = ['knowledge:read', 'customers:read', 'projects:read', 'tasks:read', 'email:read', 'browser:read'];
-  if (/\b(onboard(?:ing)?|project)\b/i.test(objective)) scopes.push('projects:write');
-  if (/\b(onboard(?:ing)?|checklist|tasks?)\b/i.test(objective)) scopes.push('tasks:write');
-  if (/\b(onboard(?:ing)?|brief|report|artifact|document|summary)\b/i.test(objective)) scopes.push('artifacts:write');
-  if (/\b(onboard(?:ing)?|email|welcome|draft|message)\b/i.test(objective)) scopes.push('email:draft');
+  const onboarding = /\bonboard\b|\b(?:perform|complete|handle|start)\s+(?:the\s+)?onboarding\b/i.test(objective);
+  if (onboarding || /\b(create|set up|build|establish)\b[\s\S]{0,100}\bproject\b/i.test(objective)) scopes.push('projects:write');
+  if (onboarding || /\b(create|prepare|make|build|add)\b[\s\S]{0,100}\b(checklist|tasks?)\b/i.test(objective)) scopes.push('tasks:write');
+  if (onboarding || /\b(prepare|write|create|produce|generate|save)\b[\s\S]{0,100}\b(brief|report|artifact|document|summary)\b/i.test(objective)) scopes.push('artifacts:write');
+  if (onboarding || /\b(draft|compose)\b|\b(prepare|create|send|dispatch)\b[\s\S]{0,100}\b(email|welcome|message)\b/i.test(objective)) scopes.push('email:draft');
   if (/\b(send|dispatch)\b/i.test(objective) && /\b(email|welcome|message)\b/i.test(objective) && !/\b(do not|don't|never|without|not to)\s+(?:actually\s+)?send(?:ing)?\b/i.test(objective)) scopes.push('email:send');
   return scopes;
 }

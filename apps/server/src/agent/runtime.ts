@@ -17,6 +17,7 @@ import { IndependentVerifier } from './verifier.js';
 import { validateGoal, validatePlan } from './planner.js';
 import { categoryTool, rejectSecrets } from './security.js';
 import { pauseForBackoff, retryableRead } from './recovery.js';
+import { normalizeName } from '../context/knowledge.js';
 
 const terminal = new Set(['COMPLETED', 'PARTIAL', 'FAILED', 'CANCELLED']);
 export class AgentRuntime {
@@ -73,17 +74,20 @@ export class AgentRuntime {
       const resolution = z.object({ resolution: z.enum(['NONE', 'UNIQUE', 'AMBIGUOUS']), candidates: z.array(z.object({ id: z.string(), companyName: z.string() })) }).parse(data);
       if (resolution.resolution === 'UNIQUE' && resolution.candidates.length === 1) {
         const customer = new BusinessStore(this.store.db).customer(resolution.candidates[0]!.id);
-        this.store.db.prepare('UPDATE agent_runs SET resolved_customer_id=? WHERE run_id=?').run(customer.id, action.run_id);
+        const state = this.store.state(action.run_id); const original = normalizeName(this.store.run(action.run_id).objective);
+        const matchesRequest = state.goal?.entities.some((entity) => original.includes(normalizeName(entity.name)) && normalizeName(customer.companyName).includes(normalizeName(entity.name))) ?? false;
+        if (matchesRequest) this.store.db.prepare('UPDATE agent_runs SET resolved_customer_id=? WHERE run_id=?').run(customer.id, action.run_id);
+        else this.question(action.run_id, { text: 'Confirm which customer the original request refers to.', reason: 'A candidate record cannot silently replace the referenced entity.', topic: 'CUSTOMER_IDENTITY', choices: [{ id: customer.id, label: customer.companyName }] });
       } else this.question(action.run_id, { text: resolution.resolution === 'NONE' ? 'No matching customer was found. Identify an existing customer to use.' : 'Several customers match. Which account should be used?', reason: 'Customer identity must be resolved before business writes.', topic: 'CUSTOMER_IDENTITY', choices: resolution.candidates.map((item) => ({ id: item.id, label: item.companyName })) });
     }
   }
   private committed(action: StoredAction): Extract<ToolOutcome, { ok: true }> | null {
     const row = action.idempotency_key
-      ? this.store.db.prepare('SELECT id,run_id,step_id,tool_name,actor_id,status,result_json FROM tool_executions WHERE idempotency_key=?').get(action.idempotency_key)
-      : this.store.db.prepare('SELECT id,run_id,step_id,tool_name,actor_id,status,result_json FROM tool_executions WHERE run_id=? AND step_id=? ORDER BY rowid DESC LIMIT 1').get(action.run_id, action.step_id);
+      ? this.store.db.prepare('SELECT id,run_id,step_id,tool_name,actor_id,arguments_hash,status,result_json FROM tool_executions WHERE idempotency_key=?').get(action.idempotency_key)
+      : this.store.db.prepare('SELECT id,run_id,step_id,tool_name,actor_id,arguments_hash,status,result_json FROM tool_executions WHERE run_id=? AND step_id=? ORDER BY rowid DESC LIMIT 1').get(action.run_id, action.step_id);
     if (!row) return null;
-    const stored = z.object({ id: z.string(), run_id: z.string(), step_id: z.string(), tool_name: z.string(), actor_id: z.string().nullable(), status: z.string(), result_json: z.string().nullable() }).parse(row);
-    if (stored.status !== 'SUCCEEDED' || !stored.result_json || stored.run_id !== action.run_id || stored.step_id !== action.step_id || stored.tool_name !== action.tool_name || stored.actor_id !== this.store.state(action.run_id).actor_id) return null;
+    const stored = z.object({ id: z.string(), run_id: z.string(), step_id: z.string(), tool_name: z.string(), actor_id: z.string().nullable(), arguments_hash: z.string().nullable(), status: z.string(), result_json: z.string().nullable() }).parse(row);
+    if (stored.status !== 'SUCCEEDED' || !stored.result_json || stored.run_id !== action.run_id || stored.step_id !== action.step_id || stored.tool_name !== action.tool_name || stored.actor_id !== this.store.state(action.run_id).actor_id || stored.arguments_hash !== sha256(canonicalJson(parseStoredJson(action.arguments_json, JsonObjectSchema)))) return null;
     const value = this.registry.resolve(action.tool_name).parseValue(JSON.parse(stored.result_json) as unknown);
     return { ok: true, executionId: stored.id, ...value, replayed: true };
   }
@@ -181,12 +185,23 @@ export class AgentRuntime {
     const committed = this.committed(action);
     if (committed) { this.store.event(action.run_id, 'RECOVERY_ATTEMPTED', { kind: 'restore_committed_result' }, action.step_id); this.verifyAndObserve(action, committed); return; }
     const metadata = this.registry.resolve(action.tool_name).metadata;
-    const row = this.store.db.prepare('SELECT status FROM tool_executions WHERE run_id=? AND step_id=? ORDER BY rowid DESC LIMIT 1').get(action.run_id, action.step_id) as { status: string } | undefined;
+    const row = this.store.db.prepare('SELECT status,error_json FROM tool_executions WHERE run_id=? AND step_id=? ORDER BY rowid DESC LIMIT 1').get(action.run_id, action.step_id) as { status: string; error_json: string | null } | undefined;
+    if (row && ['FAILED', 'CANCELLED'].includes(row.status)) {
+      const prior = ToolOutcomeSchema.safeParse(this.store.step(action.step_id).output);
+      if (!prior.success || prior.data.ok || !retryableRead(prior.data, metadata.changesPersistentState)) {
+        this.store.moveStep(action.step_id, 'FAILED', 'A non-retryable persisted failure survived interruption');
+        this.feedback(action.run_id, 'PREVIOUS_FAILURE', 'The persisted failed action was not retried.'); return;
+      }
+    }
     if (!metadata.changesPersistentState || metadata.persistence === 'sqlite' && !row) {
       // Read effects are safe to retry. SQLite local writes cannot commit without their success ledger in the same transaction.
       this.recoverBudget(action.run_id, 'resume_interrupted_local_action', action.step_id);
       if (!metadata.changesPersistentState) this.store.db.prepare("UPDATE tool_executions SET status='CANCELLED',updated_at=?,completed_at=? WHERE run_id=? AND step_id=? AND status='RUNNING'").run(this.store.now(), this.store.now(), action.run_id, action.step_id);
       this.store.moveStep(action.step_id, 'RETRYING', 'Interrupted action was reconciled as safe to resume');
+      await this.execute(action, owner, signal); return;
+    }
+    if (metadata.persistence === 'filesystem' && row && ['RUNNING', 'PENDING', 'UNKNOWN_OUTCOME'].includes(row.status)) {
+      this.recoverBudget(action.run_id, 'reconcile_interrupted_artifact', action.step_id);
       await this.execute(action, owner, signal); return;
     }
     this.store.moveStep(action.step_id, 'BLOCKED', 'Interrupted mutation needs authoritative reconciliation');
@@ -196,13 +211,18 @@ export class AgentRuntime {
   private cancellation(runId: string): void {
     for (const action of this.store.actions(runId)) {
       const step = this.store.step(action.step_id);
-      if (step.status === 'RUNNING' && this.registry.resolve(action.tool_name).metadata.changesPersistentState) {
+      if (!['SUCCEEDED', 'FAILED', 'SKIPPED', 'CANCELLED'].includes(step.status) && this.registry.resolve(action.tool_name).metadata.changesPersistentState) {
         const committed = this.committed(action);
-        if (committed) this.verifyAndObserve(action, committed);
+        if (committed) {
+          if (['BLOCKED', 'WAITING_APPROVAL'].includes(step.status)) this.store.moveStep(step.id, 'READY', 'Restoring a committed effect before cancellation');
+          if (this.store.step(step.id).status !== 'RUNNING') this.store.moveStep(step.id, 'RUNNING', 'Reading back a committed effect before cancellation');
+          this.verifyAndObserve(action, committed);
+        }
         else {
           const row = this.store.db.prepare('SELECT status FROM tool_executions WHERE idempotency_key=?').get(action.idempotency_key) as { status: string } | undefined;
           if (row && ['UNKNOWN_OUTCOME', 'RUNNING', 'PENDING'].includes(row.status) || this.registry.resolve(action.tool_name).metadata.persistence === 'filesystem') {
-            this.store.moveStep(step.id, 'BLOCKED', 'Cancellation is waiting for write reconciliation');
+            if (step.status !== 'BLOCKED') this.store.moveStep(step.id, 'BLOCKED', 'Cancellation is waiting for write reconciliation');
+            this.store.db.prepare("UPDATE agent_steps SET blocked_reason='UNKNOWN_OUTCOME' WHERE step_id=?").run(step.id);
             this.question(runId, { text: 'Cancellation is pending until the interrupted write is reconciled.', reason: 'Cancellation cannot pretend to reverse or erase an uncertain committed effect.', topic: 'RECONCILIATION', choices: [] }); return;
           }
         }
@@ -233,7 +253,7 @@ export class AgentRuntime {
     const goal = this.store.state(runId).goal!;
     for (const id of decision.deliverableIds) {
       const deliverable = goal.deliverables.find((item) => item.id === id);
-      if (!deliverable || !categoryTool[deliverable.category].includes(decision.toolName)) throw new AgentFault('DELIVERABLE_MISMATCH', 'Action does not correspond to its claimed deliverable.', 'VALIDATION');
+      if (!deliverable || !categoryTool[deliverable.category].includes(decision.toolName) && !(deliverable.category === 'EMAIL_SEND' && decision.toolName === 'create_email_draft')) throw new AgentFault('DELIVERABLE_MISMATCH', 'Action does not correspond to its claimed deliverable.', 'VALIDATION');
     }
     if (tool.metadata.changesPersistentState && !decision.deliverableIds.length) throw new AgentFault('UNREQUESTED_WRITE', 'A mutating action must support a required deliverable.', 'VALIDATION');
     this.preconditions(runId, decision.toolName, args);

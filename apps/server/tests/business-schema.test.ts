@@ -18,7 +18,7 @@ describe('Phase 2 additive persistence', () => {
       closeDatabase(db); db = openDatabase(path);
       expect(db.prepare('SELECT objective,status FROM runs WHERE id=?').get('preserved')).toEqual({ objective: 'Fictional onboarding', status: 'CREATED' });
       expect(db.prepare('SELECT * FROM schema_migrations WHERE version=1').get()).toEqual(original);
-      expect(db.prepare('SELECT count(*) AS count FROM schema_migrations').get()).toEqual({ count: 2 });
+      expect(db.prepare('SELECT count(*) AS count FROM schema_migrations').get()).toEqual({ count: migrations.length });
       expect(applyMigrations(db)).toEqual([]);
       expect(seedDemoData(db).insertedCustomers).toBe(1);
     } finally { closeDatabase(db); directory.cleanup(); }

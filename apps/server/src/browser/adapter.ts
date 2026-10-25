@@ -62,11 +62,15 @@ export class RestrictedBrowser {
       this.launch ??= chromium.launch({ headless: true, timeout: this.timeoutMs });
       try { this.browser = await this.launch; } catch { this.launch = undefined; throw new ToolFault('BROWSER_UNAVAILABLE', 'Install the pinned Playwright Chromium browser before using this adapter.', 'PERMANENT'); }
     }
+    if (bound.aborted) throw new ToolFault('BROWSER_TIMEOUT', 'Browser operation timed out or was cancelled during startup.', 'TRANSIENT', 'SAFE_READ');
     for (const session of this.sessions.values()) if (session.owner === owner) { await session.context.close(); this.sessions.delete(session.id); }
     if (this.sessions.size >= 4) throw new ToolFault('BROWSER_SESSION_LIMIT', 'Browser session limit reached.');
     const context = await this.browser.newContext({ javaScriptEnabled: false, serviceWorkers: 'block', acceptDownloads: false });
     const onAbort = () => { void context.close().catch(() => {}); };
     bound.addEventListener('abort', onAbort, { once: true });
+    // The deadline may expire while newContext is awaiting Chromium. Adding an
+    // abort listener after an already-fired signal does not invoke it.
+    if (bound.aborted) { bound.removeEventListener('abort', onAbort); await context.close(); throw new ToolFault('BROWSER_TIMEOUT', 'Browser operation timed out or was cancelled during context creation.', 'TRANSIENT', 'SAFE_READ'); }
     let failure: unknown;
     let finalUrl = value;
     try {

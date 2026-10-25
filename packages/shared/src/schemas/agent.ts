@@ -41,8 +41,11 @@ export const RunSnapshotSchema = z.strictObject({
   verification: z.array(VerificationCheckSchema).max(200), finalResult: FinalResultSchema.nullable(),
   artifacts: z.array(ArtifactRecordSchema).max(100),
   budgets: z.strictObject({ modelCalls: z.number().int().nonnegative(), toolCalls: z.number().int().nonnegative(), recoveries: z.number().int().nonnegative(), replans: z.number().int().nonnegative(), deadlineAt: UtcTimestampSchema }),
+  resolvedCustomerId: IdentifierSchema.nullable(), cancelRequested: z.boolean(),
+  actions: z.array(z.strictObject({ stepId: IdentifierSchema, toolName: z.string(), deliverableIds: z.array(IdentifierSchema), expectedOutcome: z.string(), executionId: IdentifierSchema.nullable(), approvalId: IdentifierSchema.nullable(), blockedReason: z.string().nullable() })).max(200),
+  milestones: z.array(z.strictObject({ id: IdentifierSchema, status: z.enum(['PENDING', 'IN_PROGRESS', 'VERIFIED', 'BLOCKED', 'WAITING_APPROVAL']), deliverableIds: z.array(IdentifierSchema) })).max(20),
 });
-export const RunEventsPageSchema = z.strictObject({ events: z.array(RunEventRecordSchema).max(100), nextCursor: z.number().int().nonnegative().nullable() });
+export const RunEventsPageSchema = z.strictObject({ events: z.array(RunEventRecordSchema).max(100), cursor: z.number().int().nonnegative(), nextCursor: z.number().int().nonnegative().nullable() });
 export const CreateRunRequestSchema = z.strictObject({ objective: z.string().min(1).max(8000).refine((value) => value.trim().length > 0, 'Objective must not be blank') });
 export const SubmitInputSchema = z.strictObject({ questionId: IdentifierSchema.max(200), answer: z.string().trim().min(1).max(4000), choiceId: IdentifierSchema.max(200).nullable().default(null) });
 export const ApprovalDecisionRequestSchema = z.strictObject({ decision: z.enum(['APPROVED', 'REJECTED']), note: z.string().max(1000).nullable().default(null) });
