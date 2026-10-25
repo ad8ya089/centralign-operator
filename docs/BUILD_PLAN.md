@@ -8,7 +8,8 @@
 - Acceptance: one root lockfile; shared-first builds; successful typecheck, tests, build, verify; repeatable migrations; real healthy/degraded API; frontend connection/retry; full development launch and clean stop; required documents and source fixtures.
 - Status: **Complete — acceptance passed on 2026-10-25 using Node 24.19.0 and npm 10.9.2.**
 - Observed: installation and dependency tree valid; strict typecheck passed; 71 tests across 5 files passed; production builds and full verify passed; migration CLI applied version 1; direct/proxied health returned 200; dashboard retry, offline request-error state, and recovery observed; compiled backend launched from outside the repository; all launched listeners stopped.
-- Outstanding: no required Phase 1 work. Business features remain pending under Phases 2–5. See test-plan.md for the validation record and prototype limits.
+- Outstanding: no required Phase 1 work. Later autonomous/runtime/UI/hardening work remains pending under Phases 3–5. See test-plan.md for the validation record and prototype limits.
+- Stage A revalidation: the reported Windows worker crash was reproduced under Node 22.13.1 (Node-API 9) with a Node-API 10 SQLite binding. Runtime guards were added; the same binary passed under Node 24.19.0, including individual native tests, 72 tests in the normal parallel suite, typecheck, build, and verify. The gate passed before Phase 2 work; no dependency rebuild or pool change was needed.
 
 ## 2. Company context and reusable tool layer
 
@@ -16,8 +17,10 @@
 - Scope: document catalog/ingestion and source references, entity resolution, context retrieval, validated tool registry, server-side permissions, action-specific policy and idempotency/reconciliation contracts. Start with the fictional onboarding scenario.
 - Dependencies: Phase 1 records, JSON validation, schema/migration runner, trust boundaries; additive migrations for new fields/tables.
 - Acceptance: context has traceable sources; malicious source text cannot change permissions; invalid calls fail before side effects; tool arguments/results have schemas and postconditions; stable action identity and explicit UNKNOWN_OUTCOME handling; no unauthorized outbound email.
-- Status: **Pending.**
-- Outstanding: all context/tool functionality; select minimal integrations and write deterministic fixtures/tests. Inspect architecture, shared schemas/transitions, database migration 0001, test helpers, and app construction first.
+- Status: **Complete — acceptance passed on 2026-10-25 with Node 24.19.0/npm 10.9.2.**
+- Implemented: migration 0002, repeatable seed/index, optional FTS5 and text fallback, source-backed retrieval, 15 typed tools, trusted scopes/context, transactional local idempotency, file reconciliation, exact-action sandbox approval, read-back operations, and restricted Playwright open/snapshot with real loopback tests. No Phase 3 runtime or public execution endpoint.
+- Observed: full parallel suite 124 tests/13 files passed, including six real Playwright loopback tests, a three-process idempotency race, and a normalization/ledger consistency regression test; typecheck, build, verify, and isolated tools:smoke exited 0. The real Phase 1 database migrated to version 2; first seed inserted one customer/three documents, second seed changed zero. Direct/proxied health and frontend HTTP launch passed; all development listeners stopped.
+- Outstanding: no required Phase 2 work. Prototype limits are recorded in architecture/test-plan. Phase 3 must inspect tools/index.ts, tools/contracts.ts, tools/executor.ts, tools/policy.ts, shared business schemas, and migration 0002 first.
 
 ## 3. Autonomous runtime and recovery
 
