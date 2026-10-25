@@ -6,6 +6,7 @@ import { openDatabase, closeDatabase } from './persistence/database.js';
 import { registerHealthRoute } from './api/health.js';
 import { registerRunRoutes } from './api/runs.js';
 import { registerArtifactRoute } from './api/artifact-content.js';
+import { registerLocalBoundary } from './api/local-boundary.js';
 import { RunService } from './agent/run-service.js';
 import type { RunServiceOptions } from './agent/run-service.js';
 import { AgentFault } from './agent/contracts.js';
@@ -31,6 +32,7 @@ export function createApp({ config, database, logging = true, agent }: AppOption
       requestIdHeader: false,
     });
     const runs = new RunService(db, config, agent);
+    registerLocalBoundary(app);
     app.decorate('runService', runs);
     app.addHook('onReady', async () => { if (db.open) await runs.recover(); });
     // Avoid recording URLs/query strings or request bodies, which may contain credentials.

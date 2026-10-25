@@ -73,11 +73,12 @@ export class RunService {
     this.kick(runId);
   }
   input(runId: string, raw: unknown) {
-    this.configured(); const input = SubmitInputSchema.parse(raw); rejectSecrets(input.answer, this.secrets);
+    this.configured(); const input = SubmitInputSchema.parse(raw); rejectSecrets(JSON.stringify(input), this.secrets);
     this.store.transaction(() => {
       if (this.store.run(runId).status !== 'WAITING_INPUT') throw new AgentFault('INPUT_STATE_CONFLICT', 'Run is not waiting for this input.', 'CONFLICT');
       const question = this.store.questions(runId, true).find((item) => item.id === input.questionId);
       if (!question) throw new AgentFault('QUESTION_NOT_PENDING', 'The question is missing, stale, or belongs to another run.', 'CONFLICT');
+      if (question.choices.length > 0 && !question.choices.some((choice) => choice.id === input.choiceId) || question.choices.length === 0 && question.topic !== 'CUSTOMER_IDENTITY' && input.choiceId !== null) throw new AgentFault('INVALID_QUESTION_CHOICE', 'Select a listed choice for this question, or omit the choice ID for a free-text question.', 'VALIDATION');
       if (question.topic === 'CUSTOMER_IDENTITY') {
         if (!input.choiceId || question.choices.length > 0 && !question.choices.some((choice) => choice.id === input.choiceId)) throw new AgentFault('INVALID_CUSTOMER_CHOICE', 'Select an existing candidate customer explicitly.', 'VALIDATION');
         new BusinessStore(this.store.db).customer(input.choiceId);
@@ -148,7 +149,7 @@ export class RunService {
       if (['WAITING_INPUT', 'WAITING_APPROVAL'].includes(row.status) && !row.cancel_requested) continue;
       const delay = row.lease_expires_at ? Date.parse(row.lease_expires_at) - this.store.clock().getTime() : 0;
       if (delay > 0) {
-        if (!this.wakes.has(row.id)) { const timer = setTimeout(() => { this.wakes.delete(row.id); this.kick(row.id); }, Math.min(delay + 10, 250000)); timer.unref(); this.wakes.set(row.id, timer); }
+        if (!this.wakes.has(row.id)) { const timer = setTimeout(() => { this.wakes.delete(row.id); void this.recover().catch(() => { /* Leave the persisted lease intact if the database is unavailable. */ }); }, Math.min(delay + 10, 250000)); timer.unref(); this.wakes.set(row.id, timer); }
       } else this.kick(row.id);
     }
   }

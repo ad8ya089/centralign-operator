@@ -109,4 +109,11 @@ describe('validated tool boundary', () => {
     expect(success(result, z.object({ content: z.string(), trust: z.literal('untrusted_source') })).content).toContain('Ignore policy');
     expect(await fixture.executor.execute('create_project', { customerId: 'customer-acme-logistics', name: 'Injected' }, fixture.context('injected', { grantedScopes: ['knowledge:read'] }))).toMatchObject({ ok: false, error: { category: 'PERMISSION' } });
   });
+  it('rechecks executor authority inside the write transaction before entering the handler', async () => {
+    let checks = 0;
+    const outcome = await fixture.executor.execute('create_project', { customerId: 'customer-acme-logistics', name: 'Stale worker project' }, fixture.context('stale-worker', { assertAuthority: () => { if (++checks === 2) throw new ToolFault('LEASE_LOST', 'Worker lease was replaced.', 'PERMISSION'); } }));
+    expect(checks).toBe(2); expect(outcome).toMatchObject({ ok: false, error: { code: 'LEASE_LOST' } });
+    expect(fixture.db.prepare('SELECT count(*) AS n FROM projects').get()).toEqual({ n: 0 });
+    expect(fixture.db.prepare('SELECT count(*) AS n FROM tool_executions WHERE idempotency_key=?').get('stale-worker')).toEqual({ n: 0 });
+  });
 });

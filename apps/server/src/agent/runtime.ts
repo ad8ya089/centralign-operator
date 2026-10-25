@@ -15,7 +15,7 @@ import type { StoredAction } from './run-store.js';
 import { StructuredDecisions } from './model-provider.js';
 import { IndependentVerifier } from './verifier.js';
 import { validateGoal, validatePlan } from './planner.js';
-import { categoryTool, rejectSecrets } from './security.js';
+import { categoryTool, redactSecrets, rejectSecrets } from './security.js';
 import type { SensitiveValues } from './security.js';
 import { pauseForBackoff, retryableRead } from './recovery.js';
 import { normalizeName } from '../context/knowledge.js';
@@ -57,6 +57,10 @@ export class AgentRuntime {
   private record(action: StoredAction, outcome: ToolOutcome): void {
     this.store.transaction(() => {
       const safe = ToolOutcomeSchema.parse(outcome);
+      if (!safe.ok && safe.error.category !== 'UNKNOWN_OUTCOME' && (!safe.executionId || !this.store.db.prepare("SELECT 1 FROM run_events WHERE run_id=? AND step_id=? AND event_type='TOOL_EXECUTION_FAILED' AND json_extract(payload_json,'$.executionId')=?").get(action.run_id, action.step_id, safe.executionId))) {
+        // Keep the failed attempt after a later read retry replaces the step's current output.
+        this.store.event(action.run_id, 'TOOL_EXECUTION_FAILED', { executionId: safe.executionId, error: { code: safe.error.code, category: safe.error.category, retryability: safe.error.retryability, message: redactSecrets(safe.error.message, this.secret) } }, action.step_id);
+      }
       this.store.db.prepare('UPDATE run_steps SET output_json=?,error_json=?,updated_at=? WHERE id=?').run(JSON.stringify(safe), safe.ok ? null : JSON.stringify({ code: safe.error.code, message: safe.error.message, retryable: safe.error.retryability === 'SAFE_READ', details: { category: safe.error.category, retryability: safe.error.retryability } }), this.store.now(), action.step_id);
       if (safe.executionId && this.store.db.prepare('SELECT 1 FROM tool_executions WHERE id=? AND run_id=? AND step_id=?').get(safe.executionId, action.run_id, action.step_id)) this.store.db.prepare('UPDATE agent_steps SET execution_id=? WHERE step_id=?').run(safe.executionId, action.step_id);
     });

@@ -23,6 +23,11 @@ describe('root-aware configuration', () => {
     expect(() => parseEnvironment({ BROWSER_ALLOWED_ORIGINS: 'https://example.test/path' })).toThrow();
     expect(parseEnvironment({ ARTIFACT_WORKSPACE_PATH: 'state/workspace' }).ARTIFACT_WORKSPACE_PATH).toBe(join(REPOSITORY_ROOT, 'state', 'workspace'));
   });
+  it('permits explicit loopback interfaces and rejects public or wildcard binds', () => {
+    for (const HOST of ['127.0.0.1', '127.2.3.4', '::1', '[::1]', 'localhost', 'LOCALHOST']) expect(() => parseEnvironment({ HOST })).not.toThrow();
+    for (const HOST of ['0.0.0.0', '::', '192.168.1.3', '8.8.8.8', 'example.test', 'localhost.evil.test', '127.1', '127.0.0.256', '::ffff:192.168.1.3']) expect(() => parseEnvironment({ HOST })).toThrow('loopback');
+    expect(parseEnvironment({ HOST: '[::1]' }).HOST).toBe('::1');
+  });
 
   it('finds the same root from source and compiled locations and resolves portable paths', () => {
     const directory = temporaryDirectory();

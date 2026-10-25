@@ -10,7 +10,7 @@ export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 
 export const ErrorResponseSchema = z.strictObject({
   error: z.strictObject({
-    code: z.enum(['VALIDATION_ERROR', 'NOT_FOUND', 'INTERNAL_ERROR', 'DEPENDENCY_UNAVAILABLE', 'CONFIGURATION_ERROR', 'CONFLICT']),
+    code: z.enum(['VALIDATION_ERROR', 'NOT_FOUND', 'INTERNAL_ERROR', 'DEPENDENCY_UNAVAILABLE', 'CONFIGURATION_ERROR', 'CONFLICT', 'FORBIDDEN']),
     message: z.string().min(1),
     requestId: z.string().min(1),
     details: JsonObjectSchema.nullable(),

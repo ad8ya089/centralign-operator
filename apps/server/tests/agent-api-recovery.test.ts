@@ -91,3 +91,23 @@ it('rejects expired approvals and client-supplied decision identity', async () =
   try { const id = f.service.create({ objective: ONBOARDING_OBJECTIVE }).id; await f.service.waitForIdle(id); const approval = f.service.snapshot(id).pendingApprovals[0]!; const url = `/api/v1/runs/${id}/approvals/${approval.id}/decision`; expect((await f.app.inject({ method: 'POST', url, payload: { decision: 'APPROVED', decisionMaker: 'forged' } })).statusCode).toBe(400); now += f.service.budgets.runTimeoutMs + 1; expect((await f.app.inject({ method: 'POST', url, payload: { decision: 'APPROVED' } })).statusCode).toBe(409); expect(f.db.prepare('SELECT count(*) AS n FROM sandbox_outbox').get()).toEqual({ n: 0 }); }
   finally { await f.close(); }
 });
+
+it.each([true, false])('validates choice IDs and credentials for every clarification topic (choices=%s)', async (withChoices) => {
+  const model = new FakeModelProvider([]); const secret = `AQ.${'T'.repeat(44)}`; const f = agentFixture({ provider: model }, { GEMINI_API_KEY: secret });
+  try {
+    const id = f.service.store.create('Review fictional customer context', 'local-operator', permissionsForObjective('Review'), f.service.budgets);
+    f.service.store.moveRun(id, 'UNDERSTANDING', 'Test a human question');
+    const questionId = f.service.store.question(id, { text: 'Which scope is requested?', reason: 'Explicit clarification is needed.', topic: 'MISSING_INFORMATION', choices: withChoices ? [{ id: 'brief', label: 'Prepare brief' }] : [] });
+    const url = `/api/v1/runs/${id}/input`;
+    for (const choiceId of ['unlisted', secret, null]) {
+      if (!withChoices && choiceId === null) continue;
+      const reply = await f.app.inject({ method: 'POST', url, payload: { questionId, answer: 'Use this option', choiceId } });
+      expect(reply.statusCode).toBe(400); expect(reply.body).not.toContain(secret);
+    }
+    const pending = f.service.snapshot(id).pendingQuestions[0]!; expect(pending.status).toBe('PENDING'); expect(pending.answer).toBeNull(); expect(pending.choiceId).toBeNull(); expect(model.requests).toHaveLength(0);
+    const accepted = await f.app.inject({ method: 'POST', url, payload: { questionId, answer: 'Use the selected scope', ...(withChoices ? { choiceId: 'brief' } : {}) } });
+    expect(accepted.statusCode).toBe(202); await f.service.waitForIdle(id);
+    expect(f.service.store.questions(id)[0]!.choiceId).toBe(withChoices ? 'brief' : null);
+    expect(JSON.stringify(f.service.snapshot(id))).not.toContain(secret);
+  } finally { await f.close(); }
+});

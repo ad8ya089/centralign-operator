@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { GoalSpecificationSchema, PlanSchema } from '@centralign/shared';
 import { FakeModelProvider } from '../src/agent/fake-model-provider.js';
 import { AgentFault } from '../src/agent/contracts.js';
@@ -101,7 +101,7 @@ it.each(['TRANSIENT', 'PERMISSION', 'VALIDATION'] as const)('only retries a clas
   let actual: ReturnType<typeof createToolLayer>; let calls = 0;
   const executor: ToolExecutionPort = { execute: async (name, args, context) => { calls++; if (calls === 1 || category !== 'TRANSIENT') return { ok: false, executionId: null, error: { category, code: 'TEST_FAILURE', message: 'Injected failure', retryability: category === 'TRANSIENT' ? 'SAFE_READ' : 'NEVER' } }; return actual.executor.execute(name, args, context); } };
   const f = agentFixture({ provider: new FakeModelProvider([goal, plan, search, complete]), executor }, { AGENT_MAX_REPLANS: '0' }); actual = createToolLayer(f.db, f.config);
-  try { const id = f.service.create({ objective: 'Find Acme Logistics customer' }).id; await f.service.waitForIdle(id); expect(calls).toBe(category === 'TRANSIENT' ? 2 : 1); expect(f.service.snapshot(id).run.status).toBe(category === 'TRANSIENT' ? 'COMPLETED' : 'FAILED'); }
+  try { const id = f.service.create({ objective: 'Find Acme Logistics customer' }).id; await f.service.waitForIdle(id); expect(calls).toBe(category === 'TRANSIENT' ? 2 : 1); expect(f.service.snapshot(id).run.status).toBe(category === 'TRANSIENT' ? 'COMPLETED' : 'FAILED'); const failures = f.service.events(id, 0, 100).events.filter((event) => event.type === 'TOOL_EXECUTION_FAILED'); expect(failures).toHaveLength(1); expect(failures[0]!.payload['error']).toMatchObject({ code: 'TEST_FAILURE', category }); }
   finally { await actual.close(); await f.close(); }
 });
 it('stops when the overall deadline expires', async () => {
@@ -134,5 +134,39 @@ it('keeps cancellation pending for an unknown write and requires authoritative r
     f.db.prepare("UPDATE tool_executions SET status='SUCCEEDED',result_json=? WHERE idempotency_key=?").run(JSON.stringify(committedResult), key);
     f.service.input(id, { questionId: question.id, answer: 'Authoritative ledger has been reconciled' }); await f.service.waitForIdle(id);
     expect(f.service.snapshot(id).run.status).toBe('CANCELLED'); expect(f.service.snapshot(id).finalResult?.verified.some((item) => item.deliverableId === 'project')).toBe(true); expect(projectCalls).toBe(1);
+  } finally { await actual.close(); await f.close(); }
+});
+
+it('rechecks a renewed lease at its wake time and recovers after the final expiration', async () => {
+  let now = Date.now(); vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const model = new FakeModelProvider([goal, plan, search, complete]); const f = agentFixture({ provider: model, clock: () => new Date(now) });
+  try {
+    const id = f.service.store.create('Find Acme Logistics customer', 'local-operator', permissionsForTest(), f.service.budgets);
+    expect(f.service.store.lease(id, 'other-worker', 100)).toBe(true); await f.service.recover();
+    f.db.prepare('UPDATE agent_runs SET lease_expires_at=? WHERE run_id=?').run(new Date(now + 250).toISOString(), id);
+    now += 111; await vi.advanceTimersByTimeAsync(111); expect(model.requests).toHaveLength(0);
+    now += 150; await vi.advanceTimersByTimeAsync(150); await f.service.waitForIdle(id);
+    expect(f.service.snapshot(id).run.status).toBe('COMPLETED'); expect(model.requests).toHaveLength(4);
+  } finally { await f.close(); vi.useRealTimers(); }
+});
+function permissionsForTest(): ('knowledge:read' | 'customers:read')[] { return ['knowledge:read', 'customers:read']; }
+
+it.each(['read', 'committed-write'] as const)('cancels during %s and reports actual committed effects', async (point) => {
+  let actual: ReturnType<typeof createToolLayer>; let started!: () => void; const ready = new Promise<void>((resolve) => { started = resolve; }); let writes = 0;
+  const executor: ToolExecutionPort = { execute: async (name, args, context) => {
+    if (point === 'read' && name === 'search_company_knowledge') { started(); await new Promise<void>((resolve) => context.signal!.addEventListener('abort', () => resolve(), { once: true })); return { ok: false, executionId: null, error: { code: 'CANCELLED', category: 'TRANSIENT', retryability: 'SAFE_READ', message: 'Read cancelled' } }; }
+    const value = await actual.executor.execute(name, args, context);
+    if (name === 'create_project' && value.ok) { writes++; if (point === 'committed-write') f.service.cancel(context.runId); }
+    return value;
+  } };
+  const model = createOnboardingTestModel(); const f = agentFixture({ provider: model, executor }); actual = createToolLayer(f.db, f.config);
+  try {
+    const id = f.service.create({ objective: ONBOARDING_OBJECTIVE }).id;
+    if (point === 'read') { await ready; f.service.cancel(id); }
+    await f.service.waitForIdle(id); const snapshot = f.service.snapshot(id);
+    expect(snapshot.run.status).toBe('CANCELLED'); expect(writes).toBe(point === 'read' ? 0 : 1);
+    expect(f.db.prepare('SELECT count(*) AS n FROM projects').get()).toEqual({ n: writes });
+    expect(f.db.prepare('SELECT count(*) AS n FROM sandbox_outbox').get()).toEqual({ n: 0 });
+    if (point === 'committed-write') expect(snapshot.finalResult?.verified.some((item) => item.deliverableId === 'project')).toBe(true);
   } finally { await actual.close(); await f.close(); }
 });
