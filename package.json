@@ -16,7 +16,8 @@
     "db:migrate": "node scripts/check-runtime.mjs && npm run build --workspace @centralign/shared && npm run db:migrate --workspace @centralign/server",
     "db:seed": "node scripts/check-runtime.mjs && npm run build --workspace @centralign/shared && npm run db:seed --workspace @centralign/server",
     "tools:smoke": "node scripts/check-runtime.mjs && npm run build --workspace @centralign/shared && vitest run apps/server/tests/tool-workflow.test.ts",
-    "agent:demo": "node scripts/check-runtime.mjs && npm run build --workspace @centralign/shared && npm run agent:demo --workspace @centralign/server"
+    "agent:demo": "node scripts/check-runtime.mjs && npm run build --workspace @centralign/shared && npm run agent:demo --workspace @centralign/server",
+    "model:smoke": "node scripts/check-runtime.mjs && npm run build --workspace @centralign/shared && npm run model:smoke --workspace @centralign/server"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

@@ -36,6 +36,10 @@ button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visibl
 .avatar { width: 29px; height: 29px; display: grid; place-items: center; border: 1px solid #d6dfcf; border-radius: 50%; font-size: 9px; color: #4c6955; background: #e8eede; }
 .console-main main { max-width: 1440px; margin: 0 auto; padding: 37px 40px 50px; min-height: calc(100vh - 150px); }
 .console-main main:focus { outline: none; }
+.data-use-notice { border: 1px solid #e7ddba; background: #fcf9ef; padding: 13px 15px; border-radius: 7px; margin-bottom: 20px; color: #75622e; font-size: 11px; line-height: 1.7; }
+.data-use-notice strong { font-size: 12px; color: #655123; }
+.data-use-notice p { margin: 5px 0 0; }
+.data-use-notice a { text-decoration: underline; text-underline-offset: 2px; }
 .page-heading { display: flex; align-items: start; justify-content: space-between; gap: 20px; margin-bottom: 30px; }
 .page-heading .muted { margin: 0; font-size: 13px; }
 .local-pill { display: inline-flex; align-items: center; gap: 7px; color: #657765; padding-top: 12px; font-size: 10px; white-space: nowrap; }

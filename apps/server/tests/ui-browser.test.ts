@@ -55,6 +55,7 @@ async function confirmApproval() { await page.getByRole('button', { name: 'Appro
 it('creates a real run, drains event pages, reviews exact approval, reloads durable state and displays verified outcomes separately from activation', async () => {
   const requests: string[] = []; page.on('request', (request) => { if (request.method() === 'POST') requests.push(request.url()); });
   await page.goto(origin); await page.getByRole('heading', { name: 'What needs to get done?' }).waitFor(); await page.screenshot({ path: join(screenshots, 'desktop-workspace.png') });
+  expect(await page.getByRole('complementary', { name: 'Model data use' }).innerText()).toContain('reviewed by humans');
   const id = await awaitingApproval(); const approval = fixture.service.snapshot(id).pendingApprovals[0]!; const action = SendEmailActionSchema.parse(approval.action);
   expect(await page.locator('.message-envelope').innerText()).toContain(action.recipient); expect(await page.locator('.message-envelope').innerText()).toContain(action.subject); expect(await page.locator('.message-body').innerText()).toBe(action.body); expect(outboxCount(id)).toBe(0); expect(requests.filter((url) => url.endsWith('/decision'))).toHaveLength(0);
   await page.locator('[data-event-id]').first().waitFor(); const loaded = await page.locator('[data-event-id]').count(); expect(loaded).toBeGreaterThan(50);
@@ -103,7 +104,7 @@ it('renders hostile artifact text inertly and refuses a subsequently tampered fi
 it('handles real validation, configuration errors and missing run links without a frontend fallback', async () => {
   await page.goto(origin); await page.getByRole('button', { name: 'Start run', exact: true }).click(); await page.getByRole('alert').filter({ hasText: 'Enter a request' }).waitFor();
   let submissions = 0; await page.route('**/api/v1/runs', async (route) => { if (route.request().method() !== 'POST') return route.continue(); submissions++; await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'CONFIGURATION_ERROR', message: 'Configure backend', requestId: 'ui-config-test', details: null }, timestamp: new Date().toISOString() }) }); });
-  await page.getByLabel('Your request', { exact: true }).fill('Read company context'); await page.getByRole('button', { name: 'Start run', exact: true }).click(); await page.getByRole('alert').filter({ hasText: 'OPENAI_API_KEY' }).waitFor(); expect(submissions).toBe(1); expect(new URL(page.url()).pathname).toBe('/');
+  await page.getByLabel('Your request', { exact: true }).fill('Read company context'); await page.getByRole('button', { name: 'Start run', exact: true }).click(); await page.getByRole('alert').filter({ hasText: 'GEMINI_API_KEY' }).waitFor(); expect(submissions).toBe(1); expect(new URL(page.url()).pathname).toBe('/');
   await page.goto(`${origin}/runs/does-not-exist`); await page.getByRole('heading', { name: 'Run not found' }).waitFor(); await page.goto(`${origin}/runs/`); await page.getByRole('heading', { name: 'Run link missing or invalid' }).waitFor();
 }, 40000);
 it('prevents duplicate task submission while the accepted request is pending', async () => {

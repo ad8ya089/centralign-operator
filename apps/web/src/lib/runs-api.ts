@@ -26,7 +26,7 @@ async function checkedFetch(path: string, init: RequestInit, signal?: AbortSigna
       const parsed = ErrorResponseSchema.safeParse(body);
       if (!parsed.success) throw invalid();
       const safeMessages: Record<string, string> = {
-        CONFIGURATION_ERROR: 'Live execution is unavailable until the backend is configured with OPENAI_API_KEY. Your request was not started.',
+        CONFIGURATION_ERROR: 'Live execution is unavailable until the selected provider is configured on the backend: GEMINI_API_KEY for Gemini, or OPENAI_API_KEY for OpenAI. Your request was not started.',
         NOT_FOUND: 'This run or artifact could not be found. It may belong to a different local workspace.',
         INTERNAL_ERROR: 'The service could not complete the request. Please retry.',
         CONFLICT: path.includes('/artifacts/') ? 'Artifact bytes or source metadata failed verification. The file was not returned.' : 'The persisted state changed or the decision expired. Review the refreshed state before retrying.',

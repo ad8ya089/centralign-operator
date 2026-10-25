@@ -2,7 +2,7 @@
 
 Phase 4 of a five-phase proof of concept: a single AI operator with a real workspace for submitting goals, following execution, reviewing exact actions and inspecting independently verified results.
 
-Implemented: the Phase 1–3 runtime and 15 tools plus the run workspace, persisted recent runs, live event timeline, plans/steps, exact-action approval/rejection, clarification, cancellation, decision history, verification/source evidence and safe artifact download/text preview. Email remains a local sandbox. This is a loopback-only prototype with a fixed server-controlled local decision identity, not authenticated multi-user access. Phase 5 remains pending.
+Implemented: the runtime and 15 tools plus the run workspace, persisted recent runs, live event timeline, plans/steps, exact-action approval/rejection, clarification, cancellation, decision history, verification/source evidence and safe artifact download/text preview. Gemini is the default live provider; OpenAI remains an explicitly selected alternative. Email remains a local sandbox. This is a loopback-only prototype with a fixed server-controlled local decision identity, not authenticated multi-user access. Phase 5 evaluation and final review are in progress.
 
 ## Setup
 
@@ -34,6 +34,10 @@ Windows runtime note: Node 22.13.1 provides Node-API 9, while this installed bet
 
 ## Environment
 
+Default provider: `MODEL_PROVIDER=gemini`, `GEMINI_MODEL=gemini-3.8-flash`. Set `GEMINI_API_KEY` in the ignored root `.env`. Use `MODEL_PROVIDER=openai` plus `OPENAI_API_KEY` to select OpenAI instead. Missing credentials never trigger a provider or fake-model fallback. `MODEL_TIMEOUT_MS` applies to the selected provider; the existing OPENAI_TIMEOUT_MS remains a fallback when it is unset. `npm run model:smoke` sends one small synthetic structured request with no business tools or private context.
+
+**Gemini unpaid-tier data use:** Google may use inputs/outputs to improve products, and human reviewers may process them. Use fictional or explicitly approved test data. Do not submit confidential company data, credentials, sensitive personal information or real customer records on an unpaid tier. Quotas and access can change. Paid projects have different terms; the app cannot infer billing status from the key. Check [Google's terms](https://ai.google.dev/gemini-api/terms), [pricing](https://ai.google.dev/gemini-api/docs/pricing) and [models](https://ai.google.dev/gemini-api/docs/models).
+
 Defaults work without `.env`. Optionally copy `.env.example` to `.env` (PowerShell: `Copy-Item .env.example .env`) and edit it. Existing process environment variables take precedence. Restart development after changing configuration.
 
 | Variable | Default | Meaning |
@@ -45,7 +49,11 @@ Defaults work without `.env`. Optionally copy `.env.example` to `.env` (PowerShe
 | `DATABASE_PATH` | `.data/centralign.sqlite` | Absolute path or path relative to the repository root |
 | `ARTIFACT_WORKSPACE_PATH` | `.data/workspaces` | Trusted artifact workspace; absolute or repository-relative |
 | `BROWSER_ALLOWED_ORIGINS` | empty | Comma-separated exact HTTP(S) origins; empty denies browser navigation |
-| `OPENAI_API_KEY` | unset | Optional at startup; required for live task submission |
+| `MODEL_PROVIDER` | `gemini` | Explicit live provider: gemini or openai |
+| `GEMINI_API_KEY` | unset | Required for live Gemini submission |
+| `GEMINI_MODEL` | `gemini-3.8-flash` | Gemini structured-output model |
+| `MODEL_TIMEOUT_MS` | unset | Selected-provider timeout; falls back to OPENAI_TIMEOUT_MS |
+| `OPENAI_API_KEY` | unset | Required only when MODEL_PROVIDER=openai |
 | `OPENAI_MODEL` | `gpt-6-sol` | Configurable model used by official Responses structured outputs |
 | `OPENAI_TIMEOUT_MS` | `30000` | Per-call timeout, 100–120000 ms |
 | `AGENT_MAX_MODEL_CALLS` | `40` | Persisted limit, 1–200 |
@@ -54,7 +62,7 @@ Defaults work without `.env`. Optionally copy `.env.example` to `.env` (PowerShe
 | `AGENT_MAX_REPLANS` | `4` | Adaptation limit, 0–20 |
 | `AGENT_RUN_TIMEOUT_MS` | `1800000` | Durable absolute deadline, 1000–86400000 ms |
 
-Both `.env` and relative database paths resolve from the repository root in `src` and `dist`. Runtime databases, sidecars, credentials and builds are ignored. Startup works without an API key; live POST /api/v1/runs returns 503 CONFIGURATION_ERROR without creating a run until OPENAI_API_KEY is configured. Restart after changing configuration. Production never substitutes the fake model. No live OpenAI call was exercised during acceptance because no key was configured; SDK transport and error handling use injected responses in tests.
+Both `.env` and relative database paths resolve from the repository root in `src` and `dist`. Runtime databases, sidecars, credentials and builds are ignored. Startup works without an API key; live POST /api/v1/runs returns 503 CONFIGURATION_ERROR without creating a run until the selected provider's key is configured. Restart after changing configuration. Production never substitutes another provider or fake model. SDK transport and error handling use injected responses in normal tests.
 
 The Vite proxy reads backend `HOST` and `PORT` from root configuration. Browser requests use `/api/v1/health`; no permissive CORS is configured. Only `VITE_` variables are exposed by Vite: never put secrets in variables with that prefix.
 

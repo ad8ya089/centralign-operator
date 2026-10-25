@@ -5,6 +5,8 @@ export type ScriptedResponse = unknown | ((request: StructuredModelRequest) => u
 /** Explicit test injection only. Production composition never instantiates this provider. */
 export class FakeModelProvider implements ModelProvider {
   readonly configured = true;
+  readonly name = 'fake' as const;
+  readonly model = 'deterministic-test';
   readonly requests: StructuredModelRequest[] = [];
   constructor(private readonly responses: ScriptedResponse[]) {}
   async generateStructured(request: StructuredModelRequest): Promise<unknown> {

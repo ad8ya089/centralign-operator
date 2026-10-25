@@ -5,7 +5,7 @@ import type { AppConfig } from '../config/env.js';
 import { createToolLayer } from '../tools/layer.js';
 import type { ModelProvider, RuntimeBudgets, ToolExecutionPort } from './contracts.js';
 import { AgentFault } from './contracts.js';
-import { OpenAIModelProvider } from './openai-provider.js';
+import { createModelProvider, modelTimeout, providerKeyName } from './provider-factory.js';
 import { permissionsForObjective, rejectSecrets } from './security.js';
 import { RunStore } from './run-store.js';
 import { AgentRuntime } from './runtime.js';
@@ -23,18 +23,20 @@ export class RunService {
   private closed = false;
   private readonly actorId: string;
   private readonly decisionMaker: string;
+  private readonly secrets: readonly string[];
   readonly budgets: RuntimeBudgets;
   constructor(db: Database.Database, private readonly config: AppConfig, options: RunServiceOptions = {}) {
     this.store = new RunStore(db, options.clock);
     this.layer = createToolLayer(db, config);
-    this.provider = options.provider ?? new OpenAIModelProvider({ ...(config.OPENAI_API_KEY ? { apiKey: config.OPENAI_API_KEY } : {}), model: config.OPENAI_MODEL, timeoutMs: config.OPENAI_TIMEOUT_MS });
-    this.runtime = new AgentRuntime(this.store, this.layer.registry, options.executor ?? this.layer.executor, this.provider, config.ARTIFACT_WORKSPACE_PATH, config.OPENAI_API_KEY);
+    this.provider = options.provider ?? createModelProvider(config);
+    this.secrets = [config.GEMINI_API_KEY, config.OPENAI_API_KEY].filter((value): value is string => Boolean(value));
+    this.runtime = new AgentRuntime(this.store, this.layer.registry, options.executor ?? this.layer.executor, this.provider, config.ARTIFACT_WORKSPACE_PATH, this.secrets);
     this.actorId = options.actorId ?? 'local-operator'; this.decisionMaker = options.decisionMaker ?? 'local-user';
-    this.budgets = { maxModelCalls: config.AGENT_MAX_MODEL_CALLS, maxToolCalls: config.AGENT_MAX_TOOL_CALLS, maxRecoveries: config.AGENT_MAX_RECOVERY_ATTEMPTS, maxReplans: config.AGENT_MAX_REPLANS, runTimeoutMs: config.AGENT_RUN_TIMEOUT_MS, modelTimeoutMs: config.OPENAI_TIMEOUT_MS };
+    this.budgets = { maxModelCalls: config.AGENT_MAX_MODEL_CALLS, maxToolCalls: config.AGENT_MAX_TOOL_CALLS, maxRecoveries: config.AGENT_MAX_RECOVERY_ATTEMPTS, maxReplans: config.AGENT_MAX_REPLANS, runTimeoutMs: config.AGENT_RUN_TIMEOUT_MS, modelTimeoutMs: modelTimeout(config) };
   }
-  private configured(): void { if (!this.provider.configured) throw new AgentFault('MODEL_UNCONFIGURED', 'Live execution is unavailable. Configure OPENAI_API_KEY in the server environment.', 'CONFIGURATION'); }
+  private configured(): void { if (!this.provider.configured) throw new AgentFault('MODEL_UNCONFIGURED', `Live execution is unavailable. Configure ${providerKeyName(this.config)} for the selected provider in the server environment.`, 'CONFIGURATION'); }
   create(raw: unknown): { id: string; status: 'CREATED' } {
-    const input = CreateRunRequestSchema.parse(raw); this.configured(); rejectSecrets(input.objective, this.config.OPENAI_API_KEY);
+    const input = CreateRunRequestSchema.parse(raw); this.configured(); rejectSecrets(input.objective, this.secrets);
     if (this.closed) throw new AgentFault('SERVICE_STOPPED', 'Runtime is shutting down.', 'CONFLICT');
     const id = this.store.create(input.objective, this.actorId, permissionsForObjective(input.objective), this.budgets);
     this.kick(id); return { id, status: 'CREATED' };
@@ -71,7 +73,7 @@ export class RunService {
     this.kick(runId);
   }
   input(runId: string, raw: unknown) {
-    this.configured(); const input = SubmitInputSchema.parse(raw); rejectSecrets(input.answer, this.config.OPENAI_API_KEY);
+    this.configured(); const input = SubmitInputSchema.parse(raw); rejectSecrets(input.answer, this.secrets);
     this.store.transaction(() => {
       if (this.store.run(runId).status !== 'WAITING_INPUT') throw new AgentFault('INPUT_STATE_CONFLICT', 'Run is not waiting for this input.', 'CONFLICT');
       const question = this.store.questions(runId, true).find((item) => item.id === input.questionId);
@@ -97,7 +99,7 @@ export class RunService {
     this.kick(runId); return { accepted: true };
   }
   decision(runId: string, approvalId: string, raw: unknown): { accepted: true; repeated: boolean } {
-    const input = ApprovalDecisionRequestSchema.parse(raw); rejectSecrets(input.note ?? '', this.config.OPENAI_API_KEY);
+    const input = ApprovalDecisionRequestSchema.parse(raw); rejectSecrets(input.note ?? '', this.secrets);
     let repeated = false;
     this.store.transaction(() => {
       this.store.state(runId);

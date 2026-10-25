@@ -3,12 +3,13 @@ import type { PermissionScope } from '../tools/contracts.js';
 import type { DeliverableCategorySchema } from '@centralign/shared';
 import type { z } from 'zod';
 
-const credentials = /sk-[a-zA-Z0-9_-]{12,}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|Bearer\s+[a-zA-Z0-9._-]{20,}/g;
-export function redactSecrets(text: string, secret?: string): string {
+const credentials = /sk-[a-zA-Z0-9_-]{12,}|AIza[a-zA-Z0-9_-]{30,}|AQ\.[a-zA-Z0-9_-]{32,}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|Bearer\s+[a-zA-Z0-9._-]{20,}/g;
+export type SensitiveValues = string | readonly string[];
+export function redactSecrets(text: string, secret?: SensitiveValues): string {
   const redacted = text.replace(credentials, '[REDACTED]');
-  return secret ? redacted.replaceAll(secret, '[REDACTED]') : redacted;
+  return (typeof secret === 'string' ? [secret] : secret ?? []).filter(Boolean).reduce((value, item) => value.replaceAll(item, '[REDACTED]'), redacted);
 }
-export function rejectSecrets(text: string, secret?: string): void {
+export function rejectSecrets(text: string, secret?: SensitiveValues): void {
   if (redactSecrets(text, secret) !== text) throw new AgentFault('SENSITIVE_CONTENT', 'Credentials must remain in environment configuration, outside objectives and tool arguments.', 'VALIDATION');
 }
 export function permissionsForObjective(objective: string): PermissionScope[] {

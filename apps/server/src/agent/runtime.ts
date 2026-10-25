@@ -16,6 +16,7 @@ import { StructuredDecisions } from './model-provider.js';
 import { IndependentVerifier } from './verifier.js';
 import { validateGoal, validatePlan } from './planner.js';
 import { categoryTool, rejectSecrets } from './security.js';
+import type { SensitiveValues } from './security.js';
 import { pauseForBackoff, retryableRead } from './recovery.js';
 import { normalizeName } from '../context/knowledge.js';
 
@@ -23,7 +24,7 @@ const terminal = new Set(['COMPLETED', 'PARTIAL', 'FAILED', 'CANCELLED']);
 export class AgentRuntime {
   readonly verifier: IndependentVerifier;
   private readonly decisions: StructuredDecisions;
-  constructor(readonly store: RunStore, private readonly registry: ToolRegistry, private readonly executor: ToolExecutionPort, provider: ModelProvider, workspaceRoot: string, private readonly secret?: string) {
+  constructor(readonly store: RunStore, private readonly registry: ToolRegistry, private readonly executor: ToolExecutionPort, provider: ModelProvider, workspaceRoot: string, private readonly secret?: SensitiveValues) {
     this.decisions = new StructuredDecisions(store, provider, registry, secret); this.verifier = new IndependentVerifier(store, workspaceRoot);
   }
   private guard(runId: string, owner: string, signal: AbortSignal, allowCancel = false): void {

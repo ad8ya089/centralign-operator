@@ -5,6 +5,8 @@ import type { ModelProvider, StructuredModelRequest } from './contracts.js';
 
 export interface OpenAIProviderOptions { apiKey?: string; model: string; timeoutMs: number; fetch?: typeof globalThis.fetch }
 export class OpenAIModelProvider implements ModelProvider {
+  readonly name = 'openai' as const;
+  get model() { return this.options.model; }
   readonly configured: boolean;
   private readonly client: OpenAI | null;
   constructor(private readonly options: OpenAIProviderOptions) {
@@ -30,10 +32,11 @@ export class OpenAIModelProvider implements ModelProvider {
     if (!this.client) throw new AgentFault('MODEL_UNCONFIGURED', 'Set OPENAI_API_KEY before submitting a live run.', 'CONFIGURATION');
     try {
       const response = await this.client.responses.create({
-        model: this.options.model, store: false, max_output_tokens: 8192,
+        model: this.options.model, store: false, max_output_tokens: Math.min(8192, Math.max(128, request.maxOutputTokens ?? 8192)),
         input: [{ role: 'system', content: request.system }, { role: 'user', content: JSON.stringify(request.context) }],
         text: { format: zodTextFormat(request.schema, `centralign_${request.phase}`) },
       }, { signal: request.signal, timeout: this.options.timeoutMs });
+      if (response.usage) request.onUsage?.({ inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens, totalTokens: response.usage.total_tokens, thinkingTokens: response.usage.output_tokens_details.reasoning_tokens ?? null });
       if (response.status !== 'completed' || !response.output_text) throw new AgentFault('MODEL_INCOMPLETE', 'Provider refused or did not complete a structured response.');
       if (Buffer.byteLength(response.output_text, 'utf8') > MAX_MODEL_OUTPUT_BYTES) throw new AgentFault('MODEL_RESPONSE_TOO_LARGE', 'Structured model response exceeded its size limit.');
       try { return JSON.parse(response.output_text) as unknown; }

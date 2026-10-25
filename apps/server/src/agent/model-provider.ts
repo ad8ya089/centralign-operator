@@ -10,6 +10,8 @@ import { SYSTEM_PROMPT } from './prompts.js';
 import { RunStore } from './run-store.js';
 import { pauseForBackoff } from './recovery.js';
 import { redactSecrets, rejectSecrets } from './security.js';
+import type { SensitiveValues } from './security.js';
+import type { ModelUsage } from './contracts.js';
 
 export function compactValue(value: unknown, maxBytes = MAX_OBSERVATION_BYTES): unknown {
   function compact(item: unknown, depth: number): unknown {
@@ -24,7 +26,7 @@ export function compactValue(value: unknown, maxBytes = MAX_OBSERVATION_BYTES): 
 }
 
 export class StructuredDecisions {
-  constructor(private readonly store: RunStore, private readonly provider: ModelProvider, private readonly registry: ToolRegistry, private readonly secret?: string) {}
+  constructor(private readonly store: RunStore, private readonly provider: ModelProvider, private readonly registry: ToolRegistry, private readonly secret?: SensitiveValues) {}
   context(runId: string): JsonObject {
     const state = this.store.state(runId); const run = this.store.run(runId);
     const steps = this.store.steps(runId); const actions = this.store.actions(runId);
@@ -56,7 +58,7 @@ export class StructuredDecisions {
     let repaired = false; let transientAttempt = 0;
     while (true) {
       guard();
-      if (!this.provider.configured) throw new AgentFault('MODEL_UNCONFIGURED', 'Configure OPENAI_API_KEY before a live task can execute.', 'CONFIGURATION');
+      if (!this.provider.configured) throw new AgentFault('MODEL_UNCONFIGURED', 'Configure the selected model provider before a live task can execute.', 'CONFIGURATION');
       const state = this.store.state(runId); const id = randomUUID(); const context = this.context(runId);
       if (repaired) context['repairInstruction'] = 'The previous candidate failed schema or semantic validation. Correct it once; preserve every requested deliverable and server constraint.';
       this.store.transaction(() => {
@@ -65,11 +67,14 @@ export class StructuredDecisions {
         this.store.event(runId, 'MODEL_CALL_STARTED', { modelCallId: id, phase, repair: repaired });
       });
       const controller = new AbortController(); const abort = () => controller.abort(); signal.addEventListener('abort', abort, { once: true });
+      const started = performance.now(); let usage: ModelUsage | null = null;
+      const usageSchema = z.strictObject({ inputTokens: z.number().int().min(0).max(1000000000).nullable(), outputTokens: z.number().int().min(0).max(1000000000).nullable(), totalTokens: z.number().int().min(0).max(1000000000).nullable(), thinkingTokens: z.number().int().min(0).max(1000000000).nullable() });
+      const metrics = () => JSON.stringify({ provider: this.provider.name ?? null, model: this.provider.model ?? null, latencyMs: Math.round(performance.now() - started), usage });
       const duration = Math.max(1, Math.min(state.budgets.modelTimeoutMs, Date.parse(state.deadline_at) - this.store.clock().getTime()));
       const timer = setTimeout(abort, duration);
       const aborted = new Promise<never>((_resolve, reject) => controller.signal.addEventListener('abort', () => reject(new AgentFault(signal.aborted ? 'MODEL_CANCELLED' : 'MODEL_TIMEOUT', signal.aborted ? 'Model request cancelled.' : 'Model request timed out.', signal.aborted ? 'CANCELLED' : 'TRANSIENT')), { once: true }));
       try {
-        const raw = await Promise.race([this.provider.generateStructured({ phase, system: `${SYSTEM_PROMPT}\nCurrent phase: ${phase}.`, context, schema, repair: repaired, signal: controller.signal }), aborted]);
+        const raw = await Promise.race([this.provider.generateStructured({ phase, system: `${SYSTEM_PROMPT}\nCurrent phase: ${phase}.`, context, schema, repair: repaired, signal: controller.signal, onUsage: (value) => { usage = usageSchema.parse(value); } }), aborted]);
         guard();
         const encoded = JSON.stringify(raw) ?? 'null';
         if (Buffer.byteLength(encoded, 'utf8') > MAX_MODEL_OUTPUT_BYTES) throw new AgentFault('MODEL_RESPONSE_TOO_LARGE', 'Model candidate exceeded the output limit.');
@@ -77,20 +82,21 @@ export class StructuredDecisions {
         const parsed = schema.safeParse(raw);
         if (!parsed.success) throw new AgentFault('MODEL_SCHEMA_INVALID', 'Model candidate did not match the required schema.', 'VALIDATION');
         semantic(parsed.data);
-        this.store.db.prepare("UPDATE agent_model_calls SET status='SUCCEEDED',response_hash=?,completed_at=? WHERE id=?").run(sha256(encoded), this.store.now(), id);
+        this.store.db.prepare("UPDATE agent_model_calls SET status='SUCCEEDED',response_hash=?,completed_at=?,metrics_json=? WHERE id=?").run(sha256(encoded), this.store.now(), metrics(), id);
         return parsed.data;
       } catch (error) {
         const fault = error instanceof AgentFault ? error : new AgentFault('MODEL_FAILED', 'Model request failed without a safe structured result.');
-        this.store.db.prepare("UPDATE agent_model_calls SET status='FAILED',error_code=?,completed_at=? WHERE id=?").run(fault.code, this.store.now(), id);
+        this.store.db.prepare("UPDATE agent_model_calls SET status='FAILED',error_code=?,completed_at=?,metrics_json=? WHERE id=?").run(fault.code, this.store.now(), metrics(), id);
         this.store.event(runId, 'MODEL_CALL_FAILED', { modelCallId: id, phase, code: fault.code });
         if (fault.category === 'VALIDATION' && !repaired) {
           this.store.counter(runId, 'recoveries', state.budgets.maxRecoveries); repaired = true;
           this.store.event(runId, 'RECOVERY_ATTEMPTED', { kind: 'structured_output_repair', modelCallId: id }); continue;
         }
         if (fault.category === 'TRANSIENT' && transientAttempt < 2) {
+          if (fault.retryAfterMs > 60000 || fault.retryAfterMs >= Date.parse(state.deadline_at) - this.store.clock().getTime()) throw new AgentFault('MODEL_RETRY_WAIT_LIMIT', 'Provider retry delay exceeds the bounded remaining run window.', 'BUDGET');
           this.store.counter(runId, 'recoveries', state.budgets.maxRecoveries);
           this.store.event(runId, 'RETRY_SCHEDULED', { kind: 'model', attempt: transientAttempt + 1, code: fault.code });
-          await pauseForBackoff(transientAttempt++, signal); continue;
+          await pauseForBackoff(transientAttempt++, signal, Math.random, fault.retryAfterMs); continue;
         }
         throw fault;
       } finally { clearTimeout(timer); signal.removeEventListener('abort', abort); }
