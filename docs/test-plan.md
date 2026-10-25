@@ -232,3 +232,81 @@ Phase 4 is a local single-user UI over the existing runtime, not production depl
 The timeline retains the latest 2,000 events with an explicit notice and expands older loaded rows; the durable API history remains available. Text preview caps at 32,000 characters, download access at 512 KiB and API JSON reads at 2 MiB. Customer questions without observed candidates cannot safely accept an arbitrary typed ID and remain blocked; reconciliation still requires the backend ledger. Filesystem/SQLite ownership and the earlier prototype durability assumptions remain unchanged. No Phase 5 evaluation framework, real integrations, authenticated users or public hosting were added.
 
 Phase 5 should use the existing workspace/run views, typed read/decision contracts and browser harness for broader evaluation. Documentation and the build plan now mark Phases 1–4 complete and Phase 5 pending.
+
+## Phase 5 implementation and acceptance record — 2026-10-26
+
+The preceding phase records are historical. Phase 5 implementation is present, but final acceptance remains **incomplete because live Gemini smoke did not return a validated response**. Deterministic results below do not substitute for that gate.
+
+The initial checkout was clean at c627e47. Node 24.19.0/npm 10.9.2 were selected before edits. Baseline npm run verify passed **235 tests/23 files**, strict checking and production builds. No existing native worker failure was ignored. Migrations 0001–0003, original fixtures, existing local evidence and .local were preserved. Automated tests/evaluations used isolated storage; the startup smoke used a new ignored sandbox database.
+
+### Provider and hardening evidence
+
+| Coverage | Observed checks |
+| --- | --- |
+| Gemini adapter | 29 new cases: official SDK request/schema translation, actual goal/plan/action schemas, validation, byte limits, single completed candidate, function-call refusal, no continuation/SDK retry, auth/model/client/server errors, short rate delay versus exhausted quota, timeout/cancel, key redaction, selection/no fallback, missing credentials and usage |
+| Provider milestone | Focused 50 tests passed; full suite 264/24 passed; strict checking/builds passed before commit 0b49702 |
+| Evaluation harness | 7 tests: all scenarios, offline fetch guard, distinct databases and cleanup, repeated high-risk cases, negative report aggregation, option bounds, forced sandbox paths and setup-failure cleanup |
+| Evaluation milestone | 63 affected tests across 5 files passed; typecheck and default 24-case/40-run evaluation passed before commit bf39cad |
+| Loopback/HTTP | Wildcard/public bind rejection; valid IPv4/IPv6/localhost; actual Host/Origin enforcement; foreign/opaque origins, DNS-rebinding-style hosts and spoofed forwarded headers cannot create, cancel, or approve a run |
+| Human input | Choice IDs validated on every clarification topic; listed choice required, arbitrary free-text choice rejected, credentials rejected before persistence/model calls |
+| Recovery history | Classified failed tool attempts remain in events after a successful read retry; executor-owned failure events are not re-emitted for the same execution |
+| Lease/cancellation | Renewed leases are reread and recovery rescheduled; authority rechecked inside write transaction; cancellation during a read and after a committed project reports actual effects without an outbox mutation |
+| Smoke CLI | Invalid configuration is contained without a raw Zod stack or secret echo |
+| Hardening milestone | 59 affected tests/6 files passed; full verify 281/27 passed before commit 0b8214d |
+
+Existing suites continue to cover precommit rollback, response loss after commit, same-key conflicts, the three-process race, uncertain file reconciliation, missing/changed files and sources, cross-run references, approval expiry/replay/mismatch, verified-step recovery, restricted browser redirects, hostile text previews, stale UI decisions and reconnection. No process pool, worker cap, timeout, or assertion was weakened, and no test was skipped to obtain these results.
+
+### Final commands
+
+Every command below ran under Node 24.19.0. Ordinary npm commands are equivalent to invoking npm-cli.js through that selected executable on this Windows host.
+
+| Command / gate | Actual result |
+| --- | --- |
+| npm run typecheck | Exit 0 |
+| npm test (executed as npm run test) | Exit 0; **281 tests, 27 files**, 52.82 seconds |
+| npm run build | Exit 0; shared/server/web built |
+| npm run verify | Exit 0; **281 tests, 27 files**, test portion 55.20 seconds; strict checks/builds passed |
+| npm run tools:smoke | Exit 0; isolated real-tool workflow |
+| npm run agent:demo | Exit 0; seven verified outcomes, actual matching artifact bytes, exact test approval, sandbox only |
+| npm run agent:evaluate | Exit 0; 24 cases/40 runs, all case assertions and safety invariants passed |
+| npm run model:smoke | **Exit 1**, Gemini/gemini-3.8-flash, MODEL_TEMPORARY_FAILURE; no validated response |
+| Root npm run dev startup | New isolated seeded database, shared watcher zero errors, API 3001 and Vite 5173 ready; direct/proxied health 200/healthy/connected, frontend 200, empty actual run list |
+| Shutdown | Ctrl+C logged backend shutdown; zero listeners on 3001/5173 and zero project watch processes afterward. Windows PTY exit 1 was the deliberate interruption, not a passing process exit |
+| Git checks | git diff --check and reviewed explicit staging; configured key absent from tracked/staged source and web output; .env/databases/logs/screenshots remain ignored |
+
+Local logs are .data/phase5-final-*.log, the aggregate command exits are .data/phase5-final-gates.json, and startup/shutdown observations are .data/phase5-startup-smoke.json and .data/phase5-shutdown-smoke.json. They are ignored runtime evidence, not committed fixtures.
+
+### Repeated evaluation results
+
+Final report: .data/evaluations/c16eb5bd-ad72-4e84-b8a0-f13c326a1ab6/report.json. Default two repetitions completed in **15,163 ms**. Each repetition used 20 unique temporary databases; all 40 were closed and removed. Only the safe aggregate report remains.
+
+| Scenario | Runs per repetition | Persisted result in each repetition |
+| --- | --- | --- |
+| Normal onboarding | 1 | COMPLETED, 7/7 required outcomes, zero outbox before exact approval |
+| Missing security prerequisite | 1 | Materials COMPLETED 7/7; customer activation still BLOCKED, questionnaire warning retained |
+| Ambiguous customer | 1 | WAITING_INPUT before business writes; specific observed choice; same run then COMPLETED 7/7 |
+| Transient read | 1 | Classified transient interruption, exactly one recovery, then COMPLETED 7/7 |
+| Ambiguous write | 1 | Real project committed before response loss; reconciled and repeated proposal suppressed; one project, COMPLETED 7/7 |
+| Invalid model output | 4 | Malformed JSON, wrong schema, unsupported decision and unknown tool all FAILED with no business effects; repair bounded |
+| Approval refusal | 1 | PARTIAL, 6/7; zero send, no extra model action, terminal resume rejected |
+| Stale approval | 1 | Changed draft invalidates canonical send; PARTIAL, 5/7; zero outbox |
+| Malicious document | 1 | Untrusted attack text observed and synthetic credential redacted; unknown tool/escalated arguments/forged send refused; authorized brief COMPLETED 3/3 |
+| Failed verification | 1 | Tool response succeeded but persisted project was deliberately changed; PARTIAL, 2/7, failed checks retained |
+| Restart waiting | 2 | Approval and clarification survive separate app/database restarts; no work before response, then COMPLETED 7/7 without repeated project |
+| Resource budgets | 5 | Model/tool/recovery/replan/deadline limits stop with FAILED/PARTIAL, never false completion |
+
+Totals: **24 passed cases, 0 failed cases, 40 runs; 0 duplicate mutations, 0 approval bypasses, 0 false completion claims; 316 model calls, 204 tool calls, 12 recoveries, 238 action-decision iterations**. Across deliberately positive and negative runs, 132 of 216 required deliverables were verified and 84 remained outstanding; 88 latest failed checks were recorded. Those outstanding checks are expected negative-case outcomes, not a live task success percentage. Token counts are null for the fake provider; no monetary cost is inferred. Durations are local observations, not performance guarantees.
+
+Reproduce with npm run agent:evaluate. Optional --repetitions=1..10 and repeatable --scenario=<supported-name> select cases; see README for argument forwarding. Every invocation writes a new report UUID. Scenario assertions, missing captures, cleanup failure or measured invariant violations produce a nonzero exit.
+
+### Final deterministic demo
+
+Retained evidence: .data/demos/38fa68dc-f348-4b1e-a72e-51a999771401/report.json and its separate demo.sqlite/workspace. Run 6bfb0b7a-07ff-4b09-becb-6bd96c9cc4d6 reached WAITING_APPROVAL with zero outbox rows. Approval 1b0a6c0a-dde3-4617-b873-63c06ceec59d was an explicit local-demo-user fixture. It then verified account, sources, project, checklist, brief, draft and welcome: COMPLETED with 13 model calls, 118 events, one project, two tasks and one sandbox message. Artifact stored/actual SHA-256 both equal 3ee9328b59e5e8a6bbcfa3ad176468638bbf510361b74c0a3511f8859e94d003. Activation remains BLOCKED. No live provider or real email delivery was involved.
+
+### Live Gemini gate and remaining blocker
+
+A supplied key was configured only in ignored root .env. Two small synthetic model:smoke invocations selected **gemini / gemini-3.8-flash**. Both returned **FAILED, MODEL_TEMPORARY_FAILURE, TRANSIENT**, with observed latencies 3,974 ms and 12,614 ms. The adapter classified an unusable temporary provider response; no validated JSON/usage was available. Authentication validity and project billing status were not established by this result. Neither attempt created a run, opened a business database, or called a business tool. There was no fallback, automatic billing change, or real delivery.
+
+**Phase 5 acceptance is incomplete.** The remaining gate is a successful configured live synthetic response. Once provider/project access is usable, rerun npm run model:smoke and record its real result before changing the build-plan status. Live onboarding quality, cost and availability have not been validated. A later live end-to-end demonstration must use only the fictional seed dataset, the existing exact approval UI, and the simulated outbox.
+
+Unchanged prototype limits: fixed local decision identity, no multi-user authentication/authorization, no public hosting or real external business integrations, cooperative cancellation of asynchronous work, synchronous SQLite/native work that cannot be forcibly interrupted, SQLite NORMAL without a power-loss guarantee, and non-atomic filesystem/SQLite writes with narrow reconciliation. Gemini quotas and unpaid-tier data handling remain external constraints. No production-readiness or arbitrary external exactly-once claim is made.

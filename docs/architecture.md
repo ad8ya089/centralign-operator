@@ -1,6 +1,6 @@
-# Architecture — Phases 1–4
+# Architecture
 
-CentrAlign Operator implements **Goal → Understand → Plan → Execute → Observe → Adapt → Verify → Complete** behind deterministic controls. The Phase 4 React workspace creates/monitors actual runs, records human decisions and exposes verified evidence. Email means a local SQLite sandbox outbox, never network delivery. Phase 5 evaluation/hardening remains pending.
+CentrAlign Operator implements **Goal → Understand → Plan → Execute → Observe → Adapt → Verify → Complete** behind deterministic controls. The React workspace creates/monitors actual runs, records human decisions and exposes verified evidence. Email means a local SQLite sandbox outbox, never network delivery. Gemini is the default live provider; reliability evaluation uses explicitly injected model behavior with isolated real persistence and tools.
 
 ```mermaid
 flowchart LR
@@ -12,7 +12,8 @@ flowchart LR
   Service --> Runtime[Sequential runtime and durable lease]
   Runtime --> Decisions[Structured goal, plan and next action]
   Decisions --> Provider[Model provider interface]
-  Provider --> OpenAI[OpenAI Responses: production]
+  Provider --> Gemini[Gemini: configured default]
+  Provider --> OpenAI[OpenAI Responses: explicit alternative]
   Provider --> Fake[Explicit fake: tests and demo only]
   Runtime --> Controls[Existing registry, schemas, scopes and policy]
   Controls --> Tools[15 existing tools]
@@ -36,9 +37,13 @@ flowchart LR
 
 This is one TypeScript monolith with three npm workspaces and one lockfile. Shared ESM contracts build before server/web. createApp constructs Fastify separately from listening, owns its database, starts recovery on readiness, and closes jobs/browser/SQLite on shutdown. Startup migrates but never seeds. createToolLayer remains reusable and server-only; its caller owns SQLite and closes browser resources.
 
-agent/contracts.ts defines provider/execution ports, faults, budgets and bounds. openai-provider.ts uses the official SDK Responses API with strict JSON-schema text output, store:false, bounded response bytes, cancellation, timeout and no SDK automatic retries. It is the application default. Missing credentials keep startup/health available and reject live submission with HTTP 503 before inserting a run. FakeModelProvider is explicitly injected only by tests or agent:demo.
+agent/contracts.ts defines provider/execution ports, faults, budgets and bounds. provider-factory.ts selects exactly MODEL_PROVIDER=gemini or openai. Gemini uses @google/genai 2.31.0 and gemini-3.8-flash by default. The OpenAI Responses implementation remains optional. Missing selected credentials keep startup/health available and reject live submission with HTTP 503 before inserting a run. There is no provider switch or fake fallback. FakeModelProvider is explicitly injected only by tests, agent:evaluate, or agent:demo.
 
-model-provider.ts validates every response again with Zod and semantic checks. One structured repair and at most two transient retries consume the persisted global recovery budget. Timeout/cancellation wraps even a provider ignoring its signal. Permanent/configuration errors do not retry. Model-call records contain phase, status and hashes, never raw reasoning or provider error bodies.
+gemini-provider.ts converts the shared Zod schema to the supported JSON Schema grammar and requests one JSON decision via models.generateContent. Zod and semantic validation enforce bounds the provider grammar cannot express. The adapter disables automatic function calling, automatic continuation, SDK retries, storage, and thought output. It enforces a 1 MiB HTTP response cap, 64 KiB decision cap, trusted token ceiling, cancellation, and timeout even for a noncooperative transport. Only one STOP text candidate is accepted; function calls and incomplete responses fail.
+
+Provider errors are normalized without raw bodies or credentials. Authentication/model errors are configuration failures; unsupported requests are permanent. Temporary service errors and short explicit rate delays may retry within the persisted recovery budget and deadline. Daily/zero/unknown quota exhaustion fails conservatively. Billing and provider selection never change automatically. The task UI and README disclose unpaid Gemini content use and human review; billing tier cannot be inferred from a key. model:smoke sends a bounded synthetic request with no run, database, or business tools.
+
+model-provider.ts validates every response again with Zod and semantic checks. One structured repair and at most two transient retries consume the persisted global recovery budget. Timeout/cancellation wraps even a provider ignoring its signal. Permanent/configuration errors do not retry. Model-call records contain phase, status, hashes and safe provider/model/latency/token metadata, never raw reasoning or provider error bodies. Missing usage remains null rather than an estimate.
 
 planner.ts checks requested outcome coverage, scope compatibility, source requirements and plan coverage. The exact original objective is separate from the immutable structured goal. Required deliverables have stable IDs, categories, counts and source requirements. Plans contain milestones, prerequisites and explicit blockers; revisions cannot remove a required outcome. Activation readiness is separate and accepted only when requested.
 
@@ -48,7 +53,7 @@ runtime.ts owns canonical state transitions, sequencing, preconditions, policy g
 
 ## Durable authority
 
-SQLite uses better-sqlite3 STRICT tables, foreign keys, recursive triggers, WAL, synchronous NORMAL and a five-second busy timeout. Migration application takes an immediate lock and validates contiguous versions/names/SHA-256 checksums. Migrations 0001 and 0002 remain unchanged. Migration 0003 adds:
+SQLite uses better-sqlite3 STRICT tables, foreign keys, recursive triggers, WAL, synchronous NORMAL and a five-second busy timeout. Migration application takes an immediate lock and validates contiguous versions/names/SHA-256 checksums. Migrations 0001–0003 remain unchanged. Migration 0003 added the tables below; additive migration 0004 adds validated nullable metrics_json to agent_model_calls and preserves existing rows.
 
 | Table | Responsibility |
 | --- | --- |
@@ -59,7 +64,7 @@ SQLite uses better-sqlite3 STRICT tables, foreign keys, recursive triggers, WAL,
 | agent_step_deliverables | Same-run many-to-many outcome associations |
 | agent_questions | Fingerprinted proposal, choices, status and attributed human answer |
 | agent_verifications | Expected/observed checks and evidence history |
-| agent_model_calls | Phase/lifecycle, request/response hashes and safe error code |
+| agent_model_calls | Phase/lifecycle, request/response hashes, safe error code and provider/latency/usage metadata |
 
 Existing runs, steps, approvals, artifacts and tool_executions remain authoritative. Migration 0003 transactionally rebuilds the event representation to expand its explicit type CHECK and add a monotonic sequence, preserving every old event's fields/ID/order and restoring append-only triggers and same-run FKs. Cursor pages use sequence, never timestamps. cursor is the last returned sequence (or supplied cursor on an empty page); nextCursor indicates another page. Retain cursor to poll later.
 
@@ -122,3 +127,21 @@ GET /api/v1/runs/:runId/artifacts/:artifactId/content resolves the artifact only
 The browser independently compares received bytes to the artifact digest and attachment identity before download or text preview. Text/Markdown/JSON are displayed as inert React text, capped at 32,000 preview characters; binary/unsupported content has download only. Recorded earlier verification is distinguished from successful current access. A content failure removes the preview and shows failure rather than a verified badge.
 
 The app remains a loopback-only single-user prototype. A local avatar or frontend form field is not authentication; decision identity stays server-controlled. Production never constructs the fake model for UI submission. Deterministic browser tests explicitly inject it into an isolated real backend and exercise the actual React/Vite interface and existing runtime/tools.
+
+## Phase 5 security and recovery review
+
+Configuration accepts localhost, ::1, and validated 127/8 IPv4 addresses; wildcard/public interfaces are rejected before opening the application. The Vite proxy uses the same explicit loopback validation. HTTP onRequest checks the actual Host and browser Origin, rejecting foreign/opaque origins and nonlocal authorities before route handling. Non-browser local clients may omit Origin. Forwarded headers cannot expand trust. Local origins on other ports remain trusted; these controls are not authentication against a local process or a public tunneling proxy.
+
+Human input validates all fields for credentials, not only the answer. Every question with listed choices requires one of those choices. Free-text non-customer questions reject arbitrary choice IDs. The existing customer no-match API still requires an explicitly selected existing record; the UI remains blocked without observed candidates. Question/run identity, current status, and authoritative reconciliation remain transactional gates.
+
+Failed tool attempts at the runtime boundary now append a safe classified failure event when the executor did not already record it. A later successful retry may replace the step's current output, while its failure history remains durable. Recovery wake timers reread persisted leases, rescheduling if another owner extended a lease rather than losing the future recovery attempt. Tests cover renewed lease expiration, authority checks inside actual write transactions, cancellation during reads, and cancellation after actual committed writes. Cancellation reports established effects; it does not promise rollback.
+
+## Deterministic evaluation
+
+agent/evaluation creates a real app, runtime, tool layer, seed, SQLite database, and artifact workspace per isolated run. Only model decisions and explicit fault boundaries are deterministic test fixtures. No live key or normal .env is loaded. Options cannot redirect its storage into the development database. Cleanup checks the temporary path prefix and confinement before removing only its own workspace.
+
+Twelve scenarios exercise happy-path materials, activation blockers, identity ambiguity, transient reads, response loss after a real commit, invalid decisions, rejected/stale approval, malicious documents, incorrect postconditions, restart at pending human decisions, and model/tool/recovery/replan/deadline limits. Multi-variant cases use separate databases. The default repeats every scenario twice: 24 cases and 40 isolated runs.
+
+Capture rereads persisted effects and invokes fresh goal verification. Reports use the shared EvaluationReportSchema and retain statuses, decision iterations, required/verified/outstanding counts, latest failed check per target, semantic duplicate counts, canonical approval matches, false completion claims, model/tool calls, recoveries, duration, and supplied usage. Unknown fake token counts remain null. Scenario assertions and measured safety failures both produce a failing exit code. Reports are saved under a new ignored .data/evaluations UUID; temporary databases are closed and removed.
+
+The evaluation proves the recorded deterministic scenarios, not live-model task quality, production confidentiality, or external exactly-once execution. Final live Gemini validation is currently blocked by MODEL_TEMPORARY_FAILURE; see test-plan.md for actual attempts and gates.
