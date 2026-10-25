@@ -14,6 +14,7 @@
     "db:seed": "tsx src/cli/seed.ts",
     "agent:demo": "tsx src/cli/agent-demo.ts",
     "model:smoke": "tsx src/cli/model-smoke.ts",
+    "agent:evaluate": "tsx src/cli/agent-evaluate.ts",
     "start": "node dist/main.js"
   },
   "dependencies": {
