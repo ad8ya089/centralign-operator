@@ -6,7 +6,7 @@ const terminalRuns = new Set(['COMPLETED', 'PARTIAL', 'FAILED', 'CANCELLED']);
 
 export const RunRecordSchema = z.strictObject({
   id: IdentifierSchema,
-  objective: z.string().trim().min(1),
+  objective: z.string().min(1).refine((value) => value.trim().length > 0, 'Objective must not be blank'),
   status: RunStatusSchema,
   createdAt: UtcTimestampSchema,
   updatedAt: UtcTimestampSchema,
