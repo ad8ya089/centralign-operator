@@ -14,11 +14,11 @@ describe('SQLite foundation', () => {
 
   it('creates all versioned tables and safely reapplies migrations', () => {
     const { db } = fixture;
-    expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all()).toEqual([
-      'approvals', 'artifacts', 'company_documents', 'memory_entries', 'run_events', 'run_steps', 'runs', 'schema_migrations', 'tool_executions',
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'document_chunks_fts%' ORDER BY name").all()).toEqual([
+      'approvals', 'artifacts', 'company_documents', 'customers', 'document_chunks', 'email_drafts', 'memory_entries', 'projects', 'run_events', 'run_steps', 'runs', 'sandbox_outbox', 'schema_migrations', 'tasks', 'tool_executions',
     ].map((name) => ({ name })));
     const before = db.prepare('SELECT * FROM schema_migrations').all();
-    expect(before).toHaveLength(1);
+    expect(before).toHaveLength(migrations.length);
     expect(before[0]).toMatchObject({ version: 1, name: 'foundation' });
     expect(applyMigrations(db)).toEqual([]);
     expect(db.prepare('SELECT * FROM schema_migrations').all()).toEqual(before);
@@ -73,7 +73,7 @@ describe('SQLite foundation', () => {
   it('rejects edited migration history', () => {
     const edited = migrations.map((migration) => ({ ...migration, sql: `${migration.sql}\n-- changed` }));
     expect(() => applyMigrations(fixture.db, edited)).toThrow('Migration history mismatch');
-    expect(fixture.db.prepare('SELECT count(*) AS count FROM schema_migrations').get()).toEqual({ count: 1 });
+    expect(fixture.db.prepare('SELECT count(*) AS count FROM schema_migrations').get()).toEqual({ count: migrations.length });
   });
 
   it('keeps temporary databases isolated and supports repeated close', () => {
@@ -94,8 +94,8 @@ it('rolls back both DDL and migration records after a partially applied batch fa
   const directory = temporaryDirectory();
   const db = new Database(join(directory.path, 'rollback.sqlite'));
   try {
-    expect(() => applyMigrations(db, [...migrations, { version: 2, name: 'broken', sql: 'CREATE TABLE transient_table (id TEXT); INSERT INTO missing_table VALUES (1);' }])).toThrow(/missing_table/);
+    expect(() => applyMigrations(db, [...migrations, { version: migrations.length + 1, name: 'broken', sql: 'CREATE TABLE transient_table (id TEXT); INSERT INTO missing_table VALUES (1);' }])).toThrow(/missing_table/);
     expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()).toEqual([]);
-    expect(applyMigrations(db)).toEqual([1]);
+    expect(applyMigrations(db)).toEqual(migrations.map((migration) => migration.version));
   } finally { closeDatabase(db); directory.cleanup(); }
 });

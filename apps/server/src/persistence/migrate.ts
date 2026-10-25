@@ -10,6 +10,7 @@ const AppliedMigrationSchema = z.strictObject({
   checksum: z.string().regex(/^[a-f0-9]{64}$/), applied_at: UtcTimestampSchema,
 });
 const checksum = (sql: string): string => createHash('sha256').update(sql).digest('hex');
+const migrationChecksum = (migration: Migration): string => checksum(migration.sql + (migration.optionalFts5Sql ? `\n-- optional FTS5\n${migration.optionalFts5Sql}` : ''));
 
 export function applyMigrations(db: Database.Database, available: readonly Migration[] = migrations): number[] {
   const ordered = [...available].sort((a, b) => a.version - b.version);
@@ -26,15 +27,21 @@ export function applyMigrations(db: Database.Database, available: readonly Migra
     const rows = z.array(AppliedMigrationSchema).parse(db.prepare('SELECT version, name, checksum, applied_at FROM schema_migrations ORDER BY version').all());
     for (const [index, row] of rows.entries()) {
       const expected = ordered[index];
-      if (!expected || row.version !== expected.version || row.name !== expected.name || row.checksum !== checksum(expected.sql)) throw new Error(`Migration history mismatch at version ${row.version}; applied migrations must not be edited`);
+      if (!expected || row.version !== expected.version || row.name !== expected.name || row.checksum !== migrationChecksum(expected)) throw new Error(`Migration history mismatch at version ${row.version}; applied migrations must not be edited`);
     }
     const applied: number[] = [];
     const insert = db.prepare('INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, ?)');
     for (const migration of ordered.slice(rows.length)) {
       db.exec(migration.sql); // Trusted, immutable source SQL; never user input.
-      insert.run(migration.version, migration.name, checksum(migration.sql), new Date().toISOString());
+      if (migration.optionalFts5Sql && supportsFts5(db)) db.exec(migration.optionalFts5Sql);
+      insert.run(migration.version, migration.name, migrationChecksum(migration), new Date().toISOString());
       applied.push(migration.version);
     }
     return applied;
   }).immediate();
+}
+
+export function supportsFts5(db: Database.Database): boolean {
+  const row = db.prepare("SELECT sqlite_compileoption_used('ENABLE_FTS5') AS enabled").get() as { enabled: number };
+  return row.enabled === 1;
 }

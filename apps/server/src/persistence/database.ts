@@ -3,10 +3,12 @@ import { dirname } from 'node:path';
 import Database from 'better-sqlite3';
 import { resolveDatabasePath } from '../config/paths.js';
 import { applyMigrations } from './migrate.js';
+import { assertSupportedRuntime } from '../config/runtime.js';
 
 export const SQLITE_BUSY_TIMEOUT_MS = 5_000;
 
 export function openDatabase(databasePath?: string): Database.Database {
+  assertSupportedRuntime();
   const path = resolveDatabasePath(databasePath);
   mkdirSync(dirname(path), { recursive: true });
   const db = new Database(path, { timeout: SQLITE_BUSY_TIMEOUT_MS });
